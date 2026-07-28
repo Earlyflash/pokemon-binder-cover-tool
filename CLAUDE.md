@@ -56,7 +56,7 @@ output PNG.
 
 ## Architecture
 
-Everything is in `binder_cover.py`, organized into four sections (see the
+Everything is in `binder_cover.py`, organized into five sections (see the
 `# ---- comment ----` banners in the file):
 
 1. **Font resolution** (`resolve_font_path`, `get_font`, `_build_font_index`,
@@ -96,9 +96,28 @@ Everything is in `binder_cover.py`, organized into four sections (see the
    and a raw Japanese series name would render as tofu boxes. `list_all_sets`
    (triggered by `--list-sets`) fetches both language datasets, merges them
    by id, and prints every set found — a standalone path in `main()` that
-   exits before any `--set`/cover-generation logic runs.
+   exits before any `--set`/cover-generation logic runs. `lookup_set_info`
+   also stashes the raw `cards` list from whichever of the en/ja set-detail
+   responses had it (as `_cards`/`_cards_lang`) purely so `--rarity-chart`
+   can reuse it without a second round trip.
 
-4. **`build_cover(cfg)`** — the actual layout engine, driven by a single
+4. **Rarity chart** (`fetch_rarity_counts`, `_sort_and_abbreviate_rarities`,
+   `_abbreviate_rarity`, `RARITY_ORDER`/`RARITY_ABBREVIATIONS`). TCGdex only
+   exposes a card's rarity via its individual card endpoint (not the bulk
+   set listing), so `fetch_rarity_counts` fires one request per card through
+   a `concurrent.futures.ThreadPoolExecutor` (network-bound, so threads are
+   fine despite the GIL) and tolerates individual failures (excluded from
+   the chart, reported as a count) rather than aborting the whole thing.
+   Opt-in via `--rarity-chart` specifically because of that per-card cost —
+   never fetched automatically. Rarity names come back as full English
+   strings ("Common", "Double Rare"); `RARITY_ABBREVIATIONS` maps well-known
+   ones to their standard short code, `_abbreviate_rarity` falls back to
+   initials for anything unrecognized, and `_sort_and_abbreviate_rarities`
+   orders the result by `RARITY_ORDER` (canonical common→rare tier order,
+   not by count) and disambiguates any two distinct rarity names that would
+   otherwise collide on the same fallback abbreviation.
+
+5. **`build_cover(cfg)`** — the actual layout engine, driven by a single
    `argparse.Namespace` (`cfg`) of CLI flags. All positions/sizes are
    computed as fractions of `cfg.size` (the canvas is always square) so the
    whole design scales cleanly at any resolution. The key trick is the inner
@@ -114,9 +133,10 @@ Everything is in `binder_cover.py`, organized into four sections (see the
    set-code → set name (+ optional Japanese name) → rule → release
    date / total cards two-column grid → rule → left column (up to 2
    `--stat` rows) alongside a right column that is *either* a QR code block
-   (`--qr-url`) *or* a circular completion gauge (`--completion`) *or*
-   blank — QR takes priority if both are given → rule → footer with Poke
-   Ball icon.
+   (`--qr-url`) *or* a circular completion gauge (`--completion`) *or* a
+   rarity distribution chart (`--rarity-chart`) *or* blank — in that
+   priority order if more than one is given → rule → footer with Poke Ball
+   icon.
 
 `main()` parses args, defaults `--out` to `<SET_CODE>_<name>_<EN|JP>_cover.png`
 (`JP` if a Japanese name ends up on the cover, `EN` otherwise), and saves the PNG.

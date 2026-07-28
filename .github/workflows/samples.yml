@@ -1,0 +1,48 @@
+name: Samples
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "binder_cover.py"
+      - "fonts/**"
+      - "scripts/generate_samples.py"
+      - ".github/workflows/samples.yml"
+  pull_request:
+    branches: ["**"]
+    paths:
+      - "binder_cover.py"
+      - "fonts/**"
+      - "scripts/generate_samples.py"
+      - ".github/workflows/samples.yml"
+  workflow_dispatch:
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install a CJK font (for Japan-exclusive set names)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate samples (does not touch the committed samples/ dir)
+        run: python scripts/generate_samples.py --output-dir generated-samples
+
+      - name: Upload generated samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-samples
+          path: generated-samples/
+          if-no-files-found: warn

@@ -28,6 +28,7 @@ Requires:  pip install pillow
 Optional:  pip install "qrcode[pil]"   (for the --qr-url option)
 """
 import argparse
+import concurrent.futures
 import datetime
 import json
 import os
@@ -298,6 +299,7 @@ def build_cover(cfg):
     qr_subcaption_font = get_font("medium", 34, fd)[0]
     gauge_pct_font = get_font("black_display", 145, fd)[0]
     gauge_caption_font = get_font("medium", 40, fd)[0]
+    rarity_caption_font = get_font("bold_caps", 50, fd)[0]
 
     stats = cfg.stats[:2]
 
@@ -326,6 +328,15 @@ def build_cover(cfg):
     qr_size = int(W * 0.1194)  # 430/3600
     if cfg.qr_url:
         qr_img = make_qr_image(cfg.qr_url, qr_size, verbose=cfg.verbose)
+
+    # Rarity chart rows are sized to fit within the same total height as the QR code
+    # box, however many rarity tiers there are -- so it never pushes the rule below
+    # it further down than a QR code or completion gauge would.
+    rarity_chart_h = qr_size + 2 * int(qr_size * 0.047)
+    num_rarity_rows = len(cfg.rarity_counts)
+    rarity_row_h = rarity_chart_h / num_rarity_rows if num_rarity_rows else rarity_chart_h
+    rarity_label_font = get_font("bold_caps", int(min(38, max(16, rarity_row_h * 0.5))), fd)[0]
+    rarity_count_font = get_font("medium", int(min(34, max(14, rarity_row_h * 0.45))), fd)[0]
 
     # ---------------------------------------------------------- background --
     img = Image.new("RGB", (W, H), BG_COLOR)
@@ -466,6 +477,39 @@ def build_cover(cfg):
                     centered(draw, gcx, cap_y, f"{completion['collected']} / {completion['total']}", val2_font, INK)
                 right_bottom = cap_y + int(val2_font.size * 0.8)
 
+        elif cfg.rarity_counts:
+            if render:
+                draw_spaced(draw, gcx, row2_top, "RARITY BREAKDOWN", rarity_caption_font, INK, 6)
+            rows_top = row2_top + int(rarity_caption_font.size * 2.1)
+
+            block_half_w = int(W * 0.165)
+            max_label_w = max(text_w(rarity_label_font, label) for label, _ in cfg.rarity_counts)
+            count_col_w = int(W * 0.035)
+            gap = int(W * 0.012)
+            label_x1 = gcx - block_half_w + max_label_w
+            bar_x0 = label_x1 + gap
+            bar_x1 = gcx + block_half_w - count_col_w - gap
+            count_x0 = bar_x1 + gap
+            bar_max_w = max(1, bar_x1 - bar_x0)
+
+            bar_h = max(3, int(rarity_row_h * 0.4))
+            max_count = max(c for _, c in cfg.rarity_counts)
+
+            if render:
+                row_y = rows_top
+                for label, count in cfg.rarity_counts:
+                    draw.text((label_x1, row_y), label, font=rarity_label_font, fill=INK, anchor="ra")
+                    bar_w = max(6, int(bar_max_w * count / max_count))
+                    bar_top = row_y + (rarity_row_h - bar_h) / 2
+                    draw.rounded_rectangle(
+                        [bar_x0, bar_top, bar_x0 + bar_w, bar_top + bar_h],
+                        radius=bar_h // 2, fill=RED)
+                    draw.text((count_x0, row_y), str(count), font=rarity_count_font, fill=GRAY, anchor="la")
+                    row_y += rarity_row_h
+            # Fixed regardless of row count, so this block is always exactly as tall
+            # as the QR code box -- see rarity_chart_h above.
+            right_bottom = rows_top + rarity_chart_h
+
         y = max(left_bottom, right_bottom) + int(W * 0.0125)
         if render:
             draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
@@ -600,6 +644,13 @@ def lookup_set_info(query, verbose=False):
         # it's actually a problem (i.e. the user didn't already supply --name themselves).
         info["_name_unavailable_jp"] = jp_name
 
+    # Stashed for --rarity-chart, which needs the set's card list to fetch rarity
+    # per-card -- reusing what we already fetched here instead of a redundant round trip.
+    if en.get("cards"):
+        info["_cards"], info["_cards_lang"] = en["cards"], "en"
+    elif ja.get("cards"):
+        info["_cards"], info["_cards_lang"] = ja["cards"], "ja"
+
     serie = en.get("serie") or ja.get("serie") or {}
     if isinstance(serie, dict) and serie.get("name") and _is_latin_text(serie["name"]):
         info["era"] = serie["name"]
@@ -666,6 +717,103 @@ def list_all_sets(verbose=False):
         print(f"{sid:<10} {shown or '(no name)'}")
 
 
+# Canonical low-to-high rarity order, and their standard short codes. Rarity names
+# not in this table (newer terminology TCGdex hasn't been mapped for yet) fall back
+# to an initials-based abbreviation in _abbreviate_rarity -- best-effort, since there's
+# no API field for the "official" short code, only the full English name.
+RARITY_ORDER = [
+    "common", "uncommon", "rare", "rare holo", "double rare", "art rare",
+    "super rare", "shiny rare", "shiny ultra rare", "illustration rare",
+    "special illustration rare", "special art rare", "ultra rare", "hyper rare",
+    "radiant rare", "amazing rare", "rare ace", "ace spec rare", "rare prime",
+    "rare break", "promo",
+]
+RARITY_ABBREVIATIONS = {
+    "common": "C", "uncommon": "U", "rare": "R", "rare holo": "RH",
+    "double rare": "RR", "art rare": "AR", "super rare": "SR",
+    "illustration rare": "IR", "special illustration rare": "SAR",
+    "special art rare": "SAR", "shiny rare": "S", "shiny ultra rare": "SUR",
+    "ultra rare": "UR", "hyper rare": "HR", "radiant rare": "RA",
+    "amazing rare": "AMZ", "rare ace": "ACE", "ace spec rare": "ACE",
+    "rare prime": "PRIME", "rare break": "BREAK", "promo": "PR",
+}
+
+
+def _abbreviate_rarity(name):
+    key = name.strip().lower()
+    if key in RARITY_ABBREVIATIONS:
+        return RARITY_ABBREVIATIONS[key]
+    words = [w for w in name.replace("-", " ").split() if w]
+    return "".join(w[0].upper() for w in words) if words else "?"
+
+
+def _sort_and_abbreviate_rarities(counts):
+    """counts: {full rarity name: count}. Returns [(short_label, count), ...] in
+    canonical low-to-high rarity order, unrecognized rarities sorted alphabetically
+    after the recognized ones."""
+    def sort_key(name):
+        key = name.strip().lower()
+        try:
+            return (0, RARITY_ORDER.index(key))
+        except ValueError:
+            return (1, key)
+
+    used = {}
+    result = []
+    for name in sorted(counts, key=sort_key):
+        label = _abbreviate_rarity(name)
+        # Guard against two distinct rarity names abbreviating to the same label
+        # (most likely for unrecognized/newer terminology) -- would otherwise show
+        # as one misleadingly-merged bar.
+        if label in used and used[label] != name:
+            n = 2
+            while f"{label}{n}" in used:
+                n += 1
+            label = f"{label}{n}"
+        used[label] = name
+        result.append((label, counts[name]))
+    return result
+
+
+def fetch_rarity_counts(cards, lang, verbose=False):
+    """Fetch each card's rarity (one API call per card -- TCGdex doesn't expose it in
+    the bulk set listing) and return [(short_label, count), ...] for --rarity-chart.
+    Runs concurrently since a full set can be 100-200+ cards; failed/unreachable
+    cards are silently excluded (reported as a count) rather than aborting."""
+    ids = [c["id"] for c in cards if c.get("id")]
+    if not ids:
+        return []
+
+    print(f"[rarity] Fetching rarity for {len(ids)} cards from TCGdex "
+          "(this can take a little while)...")
+
+    def fetch_one(card_id):
+        detail = _fetch_json(f"{TCGDEX_BASE}/{lang}/cards/{card_id}", verbose)
+        return detail.get("rarity") if detail else None
+
+    rarities = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        futures = [pool.submit(fetch_one, cid) for cid in ids]
+        for done, future in enumerate(concurrent.futures.as_completed(futures), start=1):
+            rarities.append(future.result())
+            if done % 20 == 0 or done == len(ids):
+                print(f"[rarity] ...{done}/{len(ids)} cards checked")
+
+    failed = sum(1 for r in rarities if not r)
+    if failed:
+        print(f"[warning] Couldn't determine rarity for {failed}/{len(ids)} cards -- "
+              "excluded from the chart.")
+
+    counts = {}
+    for r in rarities:
+        if r:
+            counts[r] = counts.get(r, 0) + 1
+
+    result = _sort_and_abbreviate_rarities(counts)
+    print(f"[rarity] Breakdown: {', '.join(f'{label} x{count}' for label, count in result)}")
+    return result
+
+
 # --------------------------------------------------------------------- CLI --
 
 def parse_stat(value):
@@ -704,6 +852,11 @@ def build_arg_parser():
     p.add_argument("--qr-subcaption", default="")
     p.add_argument("--completion", default="", help='"collected/total" e.g. "187/187", or a bare percent like "100". '
                                                        "Ignored if --qr-url is given.")
+    p.add_argument("--rarity-chart", action="store_true",
+                    help="Show a Common/Uncommon/Rare/etc. distribution chart in place of the "
+                         "QR code or completion gauge (only shown if neither is given). Fetches "
+                         "every card's rarity from TCGdex individually, so this is slower -- "
+                         "opt-in rather than automatic.")
     p.add_argument("--footer", default="Japanese Master Set")
     p.add_argument("--accent", default="C42A22", help="Hex accent color (no #), default a Pokémon red")
     p.add_argument("--bg-color", default="FFFFFF", help="Hex color (no #) for the area outside the panel, "
@@ -761,6 +914,16 @@ def main(argv=None):
         parser.error(f"couldn't determine {flags} from --set \"{args.set_query}\" -- "
                      f"pass them directly to fill in the gaps")
     args.total_cards = str(args.total_cards)
+
+    args.rarity_counts = []
+    if args.rarity_chart:
+        cards = looked_up.get("_cards")
+        if not cards:
+            print("[warning] --rarity-chart needs a successful --set lookup with a card "
+                  "list, which isn't available here -- skipping the rarity chart.")
+        else:
+            args.rarity_counts = fetch_rarity_counts(
+                cards, looked_up["_cards_lang"], verbose=args.verbose)
 
     if not args.out:
         safe_name = "".join(c if c.isalnum() else "_" for c in args.name).strip("_")

@@ -174,6 +174,7 @@ class TestLookupSetInfo(unittest.TestCase):
             "releaseDate": "2026-05-22",
             "serie": {"id": "M", "name": "ポケモンカードゲーム MEGA"},
             "cardCount": {"official": 81, "total": 118},
+            "cards": [{"id": "M5-001"}, {"id": "M5-002"}],
         }
         mock_fetch.side_effect = fetch_side_effect(
             ja_listing=ja_listing, en_listing=[],
@@ -190,6 +191,8 @@ class TestLookupSetInfo(unittest.TestCase):
         self.assertNotIn("era", info)  # non-Latin series name must not be auto-filled
         self.assertEqual(info["total_cards"], 118)
         self.assertEqual(info["stats"], [("Main Set", 81), ("Secret Rares", 37)])
+        self.assertEqual(info["_cards"], ja_detail["cards"])
+        self.assertEqual(info["_cards_lang"], "ja")
 
     @patch("binder_cover._fetch_json")
     def test_english_set_gets_latin_era_and_no_split_when_no_secret_rares(self, mock_fetch):
@@ -244,6 +247,76 @@ class TestListAllSets(unittest.TestCase):
         with redirect_stdout(buf):
             bc.list_all_sets()
         self.assertIn("Couldn't reach TCGdex", buf.getvalue())
+
+
+# --------------------------------------------------------------- rarity --
+
+class TestAbbreviateRarity(unittest.TestCase):
+    def test_known_rarities_use_the_standard_short_code(self):
+        self.assertEqual(bc._abbreviate_rarity("Common"), "C")
+        self.assertEqual(bc._abbreviate_rarity("Double Rare"), "RR")
+        self.assertEqual(bc._abbreviate_rarity("Art Rare"), "AR")
+        self.assertEqual(bc._abbreviate_rarity("Ultra Rare"), "UR")
+
+    def test_unrecognized_rarity_falls_back_to_initials(self):
+        self.assertEqual(bc._abbreviate_rarity("Mega Hyper Rare"), "MHR")
+
+    def test_is_case_insensitive(self):
+        self.assertEqual(bc._abbreviate_rarity("COMMON"), "C")
+
+
+class TestSortAndAbbreviateRarities(unittest.TestCase):
+    def test_orders_by_canonical_rarity_tier_not_by_count(self):
+        counts = {"Ultra Rare": 18, "Common": 38, "Double Rare": 8, "Uncommon": 27}
+        result = bc._sort_and_abbreviate_rarities(counts)
+        self.assertEqual(result, [("C", 38), ("U", 27), ("RR", 8), ("UR", 18)])
+
+    def test_unrecognized_rarities_sort_after_known_ones_alphabetically(self):
+        counts = {"Common": 10, "Zebra Rare": 1, "Alpha Rare": 2}
+        result = bc._sort_and_abbreviate_rarities(counts)
+        labels_in_order = [label for label, _ in result]
+        self.assertEqual(labels_in_order[0], "C")
+        self.assertEqual(set(labels_in_order[1:]), {"AR", "ZR"})
+
+    def test_colliding_abbreviations_are_disambiguated(self):
+        # Two distinct, unrecognized rarity names that would both abbreviate to "MR"
+        counts = {"Mega Rare": 3, "Mystic Rare": 5}
+        result = bc._sort_and_abbreviate_rarities(counts)
+        labels = [label for label, _ in result]
+        self.assertEqual(len(labels), len(set(labels)))  # no duplicate labels
+
+
+class TestFetchRarityCounts(unittest.TestCase):
+    @patch("binder_cover._fetch_json")
+    def test_counts_and_abbreviates_successful_fetches(self, mock_fetch):
+        cards = [{"id": f"M5-{i}"} for i in range(1, 6)]
+        rarity_by_id = {
+            "M5-1": {"rarity": "Common"}, "M5-2": {"rarity": "Common"},
+            "M5-3": {"rarity": "Uncommon"}, "M5-4": {"rarity": "Rare"},
+            "M5-5": {"rarity": "Rare"},
+        }
+        mock_fetch.side_effect = lambda url, verbose=False: rarity_by_id.get(url.rsplit("/", 1)[-1])
+        with redirect_stdout(io.StringIO()):
+            result = bc.fetch_rarity_counts(cards, "ja")
+        self.assertEqual(result, [("C", 2), ("U", 1), ("R", 2)])
+
+    @patch("binder_cover._fetch_json")
+    def test_failed_fetches_are_excluded_and_reported(self, mock_fetch):
+        cards = [{"id": "M5-1"}, {"id": "M5-2"}]
+
+        def side_effect(url, verbose=False):
+            return {"rarity": "Common"} if url.endswith("M5-1") else None
+
+        mock_fetch.side_effect = side_effect
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            result = bc.fetch_rarity_counts(cards, "ja")
+        self.assertEqual(result, [("C", 1)])
+        self.assertIn("Couldn't determine rarity for 1/2 cards", buf.getvalue())
+
+    def test_no_cards_returns_empty_list(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(bc.fetch_rarity_counts([], "en"), [])
 
 
 # -------------------------------------------------------------- CLI/main --
@@ -325,6 +398,44 @@ class TestMainCli(unittest.TestCase):
             finally:
                 os.chdir(prev_cwd)
 
+    @patch("binder_cover.fetch_rarity_counts")
+    @patch("binder_cover.lookup_set_info")
+    def test_rarity_chart_flag_fetches_using_stashed_cards(self, mock_lookup, mock_fetch_rarity):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name_jp": "アビスアイ",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+            "_cards": [{"id": "M5-001"}], "_cards_lang": "ja",
+        }
+        mock_fetch_rarity.return_value = [("C", 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            prev_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(io.StringIO()):
+                    bc.main(["--set", "M5", "--name", "Abyss Eye", "--rarity-chart", "--size", "300"])
+            finally:
+                os.chdir(prev_cwd)
+        mock_fetch_rarity.assert_called_once_with([{"id": "M5-001"}], "ja", verbose=False)
+
+    @patch("binder_cover.fetch_rarity_counts")
+    @patch("binder_cover.lookup_set_info")
+    def test_rarity_chart_flag_without_a_card_list_warns_and_skips(self, mock_lookup, mock_fetch_rarity):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name": "Abyss Eye",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            prev_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                buf = io.StringIO()
+                with redirect_stdout(buf):
+                    bc.main(["--set", "M5", "--rarity-chart", "--size", "300"])
+            finally:
+                os.chdir(prev_cwd)
+        mock_fetch_rarity.assert_not_called()
+        self.assertIn("skipping the rarity chart", buf.getvalue())
+
     @patch("binder_cover.list_all_sets")
     def test_list_sets_flag_bypasses_set_requirement(self, mock_list_all_sets):
         bc.main(["--list-sets"])
@@ -358,7 +469,7 @@ class TestBuildCoverSmoke(unittest.TestCase):
             era="", release_date="22 MAY 2026", total_cards="118",
             stats=[("Main Set", 81), ("Secret Rares", 37)],
             qr_url="", qr_caption="Scan To Track", qr_subcaption="",
-            completion="", footer="Japanese Master Set", accent="C42A22",
+            completion="", rarity_counts=[], footer="Japanese Master Set", accent="C42A22",
             bg_color="FFFFFF", accent_tab=True, size=600, font_dir=None, verbose=False,
         )
         for k, v in overrides.items():
@@ -389,6 +500,21 @@ class TestBuildCoverSmoke(unittest.TestCase):
     def test_renders_at_a_different_canvas_size(self):
         img = bc.build_cover(self._base_cfg(size=900))
         self.assertEqual(img.size, (900, 900))
+
+    def test_renders_with_rarity_chart(self):
+        cfg = self._base_cfg(rarity_counts=[
+            ("C", 38), ("U", 27), ("R", 8), ("RR", 8), ("UR", 18), ("MHR", 1),
+        ])
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_qr_code_takes_priority_over_rarity_chart(self):
+        # Placement decision: rarity chart only fills the right column when neither
+        # --qr-url nor --completion is given.
+        cfg = self._base_cfg(qr_url="https://example.com/abyss-eye",
+                              rarity_counts=[("C", 38), ("U", 27)])
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
 
 
 if __name__ == "__main__":
