@@ -10,6 +10,9 @@ only has their Japanese names) and the English-released me-codes (me01
 through me05, including the me02.5 half-set). Also includes one fully
 synthetic set (m6) that TCGdex doesn't know about at all, to demonstrate the
 --set-code/--name/--release-date/--total-cards/--era manual-override path.
+Also covers a handful of real Scarlet & Violet-era sets (sv01, sv03.5,
+sv08.5, sv10) so the era subheading is shown for a series other than Mega
+Evolution, and to exercise --lang-flag (one of each of its four badges).
 Between them, the jobs below exercise every flag binder_cover.py has except
 --font-dir (covered instead by tests/test_binder_cover.py's font-resolution
 tests, since it needs a real alternate font file on disk to be meaningful).
@@ -134,6 +137,35 @@ JOBS = [
                  "--total-cards", "120"],
         "out": "ME05_Pitch_Black_EN_cover.png",
         "covers": "--qr-subcaption, explicit --total-cards override",
+    },
+    {
+        "set": "sv01",
+        "args": ["--lang-flag", "en"],
+        "out": "SV01_Scarlet___Violet_EN_cover.png",
+        "covers": "a different series' era subheading (Scarlet & Violet), --lang-flag en, "
+                  "defaults only otherwise",
+    },
+    {
+        "set": "sv03.5",
+        "args": ["--completion", "165/207", "--lang-flag", "jp"],
+        "out": "SV03.5_151_EN_cover.png",
+        "covers": "era subheading + --completion (collected/total form), --lang-flag jp",
+    },
+    {
+        "set": "sv08.5",
+        "args": ["--qr-url", f"{RARECANDY}/prismatic-evolutions?username=Earlyflash",
+                 "--lang-flag", "cn"],
+        "out": "SV08.5_Prismatic_Evolutions_EN_cover.png",
+        "covers": "era subheading + --qr-url, --lang-flag cn",
+    },
+    {
+        "set": "sv10",
+        "args": ["--stat", "Full Arts", "24", "--stat", "Special Illustration Rares", "18",
+                 "--lang-flag", "kr"],
+        "out": "SV10_Destined_Rivals_JP_cover.png",
+        "covers": "era subheading + auto-filled English/Japanese dual name (no --name-jp "
+                  "override needed here, unlike the Japan-exclusive m-codes above), two "
+                  "--stat overrides, --lang-flag kr",
     },
 ]
 

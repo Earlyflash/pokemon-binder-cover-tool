@@ -74,11 +74,16 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    avoids ever overflowing the panel with long set names/footers.
 
 2. **Drawing primitives** (`draw_spaced`, `measure_spaced`, `centered`,
-   `pokeball`, `make_qr_image`, `hex_to_rgb`). Low-level Pillow helpers:
-   letter-spaced text (used everywhere for the all-caps display text),
-   centered text, the Poke Ball icon drawn as concentric ellipses/pieslices,
-   and QR image generation with a `qrcode` → `reportlab` → skip fallback
-   chain.
+   `pokeball`, `make_qr_image`, `make_flag_badge`, `hex_to_rgb`). Low-level
+   Pillow helpers: letter-spaced text (used everywhere for the all-caps
+   display text), centered text, the Poke Ball icon drawn as concentric
+   ellipses/pieslices, QR image generation with a `qrcode` → `reportlab` →
+   skip fallback chain, and the `--lang-flag` corner badge (`en`/`jp`/`cn`/
+   `kr`) — four simplified national flags built entirely from primitives
+   (ellipses, pieslices, polygons via `_star_points`, rectangles), not image
+   assets, so they scale cleanly with `--size` like everything else. It's a
+   purely cosmetic label the user picks themselves, unrelated to the
+   TCGdex-derived `--name`/`--name-jp` (TCGdex itself only has en/ja data).
 
 3. **Set lookup** (`lookup_set_info`, `_find_set_id`, `_fetch_json`,
    `_format_release_date`, `_is_latin_text`, `list_all_sets`). Queries
@@ -136,7 +141,10 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    (`--qr-url`) *or* a circular completion gauge (`--completion`) *or* a
    rarity distribution chart (`--rarity-chart`) *or* blank — in that
    priority order if more than one is given → rule → footer with Poke Ball
-   icon.
+   icon. The `--lang-flag` badge (if given) is drawn separately, straight
+   onto the background before `run()` is called — like the accent tab, it
+   sits in the fixed margin/inset strip outside the centered content flow,
+   so it doesn't participate in the two-pass height measurement.
 
 `main()` parses args, defaults `--out` to `<SET_CODE>_<name>_<EN|JP>_cover.png`
 (`JP` if a Japanese name ends up on the cover, `EN` otherwise), and saves the PNG.

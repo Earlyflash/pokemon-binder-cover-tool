@@ -128,6 +128,22 @@ are omitted since every invocation needs them.
 <td><img src="samples/ME05_Pitch_Black_EN_cover.png" width="260" alt="ME05 Pitch Black cover"></td>
 <td>QR code with a custom subcaption and an explicit <code>--total-cards</code> override: <code>--qr-subcaption "Master Set" --total-cards 120</code></td>
 </tr>
+<tr>
+<td><img src="samples/SV01_Scarlet___Violet_EN_cover.png" width="260" alt="SV01 Scarlet & Violet cover"></td>
+<td>A different series' era subheading ("Scarlet & Violet" instead of "Mega Evolution") plus the English flag badge: <code>--lang-flag en</code>, defaults otherwise</td>
+</tr>
+<tr>
+<td><img src="samples/SV03.5_151_EN_cover.png" width="260" alt="SV03.5 151 cover"></td>
+<td>Completion gauge plus the Japanese flag badge: <code>--completion "165/207" --lang-flag jp</code></td>
+</tr>
+<tr>
+<td><img src="samples/SV08.5_Prismatic_Evolutions_EN_cover.png" width="260" alt="SV08.5 Prismatic Evolutions cover"></td>
+<td>QR code plus the Chinese flag badge: <code>--qr-url ... --lang-flag cn</code></td>
+</tr>
+<tr>
+<td><img src="samples/SV10_Destined_Rivals_JP_cover.png" width="260" alt="SV10 Destined Rivals cover"></td>
+<td>The Korean flag badge (<code>--lang-flag kr</code>) plus two custom stat rows -- also shows that a set with an official English release gets its Japanese name filled in automatically, unlike the Japan-exclusive M-series above which needs <code>--name-jp</code> by hand</td>
+</tr>
 </table>
 
 ## All the flags
@@ -152,6 +168,7 @@ are omitted since every invocation needs them.
 | `--footer` | no | Bottom banner text next to the Poke Ball icon. Default `Japanese Master Set`. |
 | `--accent` | no | Hex accent color (no `#`), default `C42A22` (Poke Ball red). |
 | `--accent-tab` / `--no-accent-tab` | no | Show/hide the small red tab on the right edge. Default on. |
+| `--lang-flag` | no | Show a small national flag badge in the top-left corner: `en`, `jp`, `cn`, or `kr`. Off by default. Purely a label you choose yourself -- independent of `--name`/`--name-jp`/the TCGdex lookup, since TCGdex itself only covers English and Japanese. |
 | `--bg-color` | no | Hex color (no `#`) for the area outside the panel. Default `FFFFFF` (white), so printing doesn't waste ink. |
 | `--size` | no | Canvas size in px (square). Default `3600` (12in @ 300dpi). |
 | `--font-dir` | no | An extra folder to search for fonts first (useful if you want to swap in your own). |
@@ -190,6 +207,12 @@ are omitted since every invocation needs them.
   (e.g. "Mega Hyper Rare" -> "MHR") rather than guessing wrong. Cards TCGdex
   couldn't return a rarity for are excluded from the chart and reported as a
   count, not silently dropped.
+- **Language flag badge** (`--lang-flag`): a small stylized flag drawn in the
+  top-left corner (English/Japanese/Chinese/Korean) -- simplified for
+  legibility at that size, not a heraldically exact reproduction. It's just a
+  label for your own binder; TCGdex only has English and Japanese data, so
+  `cn`/`kr` don't pull in any Chinese/Korean set info, they just draw that
+  flag.
 - **Long names**: text that's too wide for the card (a long `--name`, a long
   `--footer`, etc.) automatically shrinks to fit -- you don't need to worry
   about it overflowing the panel.

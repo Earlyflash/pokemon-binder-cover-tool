@@ -470,7 +470,7 @@ class TestBuildCoverSmoke(unittest.TestCase):
             stats=[("Main Set", 81), ("Secret Rares", 37)],
             qr_url="", qr_caption="Scan To Track", qr_subcaption="",
             completion="", rarity_counts=[], footer="Japanese Master Set", accent="C42A22",
-            bg_color="FFFFFF", accent_tab=True, size=600, font_dir=None, verbose=False,
+            bg_color="FFFFFF", accent_tab=True, lang_flag=None, size=600, font_dir=None, verbose=False,
         )
         for k, v in overrides.items():
             setattr(cfg, k, v)
@@ -515,6 +515,21 @@ class TestBuildCoverSmoke(unittest.TestCase):
                               rarity_counts=[("C", 38), ("U", 27)])
         img = bc.build_cover(cfg)
         self.assertEqual(img.size, (600, 600))
+
+    def test_renders_with_each_lang_flag(self):
+        for lang in ("en", "jp", "cn", "kr"):
+            with self.subTest(lang=lang):
+                img = bc.build_cover(self._base_cfg(lang_flag=lang))
+                self.assertEqual(img.size, (600, 600))
+
+
+class TestMakeFlagBadge(unittest.TestCase):
+    def test_returns_image_of_requested_size_for_every_language(self):
+        for lang in ("en", "jp", "cn", "kr"):
+            with self.subTest(lang=lang):
+                img = bc.make_flag_badge(80, 53, lang)
+                self.assertEqual(img.size, (80, 53))
+                self.assertEqual(img.mode, "RGB")
 
 
 if __name__ == "__main__":

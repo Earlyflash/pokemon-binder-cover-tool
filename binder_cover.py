@@ -31,6 +31,7 @@ import argparse
 import concurrent.futures
 import datetime
 import json
+import math
 import os
 import platform
 import sys
@@ -197,6 +198,84 @@ def pokeball(draw, cxp, cyp, r, ink, red, bg):
     draw.ellipse([cxp - core_r, cyp - core_r, cxp + core_r, cyp + core_r], fill=bg)
 
 
+def _star_points(cx, cy, r, rotation=-90, inner_ratio=0.4):
+    """Vertices of a 5-pointed star, `rotation` degrees from one point facing east."""
+    pts = []
+    for i in range(10):
+        ang = math.radians(rotation + i * 36)
+        rad = r if i % 2 == 0 else r * inner_ratio
+        pts.append((cx + rad * math.cos(ang), cy + rad * math.sin(ang)))
+    return pts
+
+
+LANG_FLAG_NAMES = {"en": "English", "jp": "Japanese", "cn": "Chinese", "kr": "Korean"}
+
+
+def make_flag_badge(w, h, lang):
+    """A small stylized national flag for the --lang-flag corner badge.
+    Simplified for legibility at icon size (a few dozen px) -- not a
+    heraldically exact reproduction of any flag."""
+    img = Image.new("RGB", (w, h), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    cx, cy = w / 2, h / 2
+
+    if lang == "jp":
+        r = min(w, h) * 0.32
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(188, 0, 45))
+
+    elif lang == "cn":
+        draw.rectangle([0, 0, w, h], fill=(222, 41, 16))
+        big_r = min(w, h) * 0.19
+        draw.polygon(_star_points(w * 0.27, h * 0.3, big_r), fill=(255, 222, 0))
+        small_r = big_r * 0.32
+        for dx, dy, rot in [(0.46, 0.10, -70), (0.55, 0.23, -35),
+                             (0.55, 0.40, 15), (0.47, 0.53, 55)]:
+            draw.polygon(_star_points(w * dx, h * dy, small_r, rotation=rot), fill=(255, 222, 0))
+
+    elif lang == "kr":
+        r = min(w, h) * 0.28
+        red, blue = (205, 46, 44), (0, 43, 127)
+        draw.pieslice([cx - r, cy - r, cx + r, cy + r], -45, 135, fill=red)
+        draw.pieslice([cx - r, cy - r, cx + r, cy + r], 135, 315, fill=blue)
+        dot_r = r * 0.26
+        dx = r * 0.5 * math.cos(math.radians(-45))
+        dy = r * 0.5 * math.sin(math.radians(-45))
+        draw.ellipse([cx + dx - dot_r, cy + dy - dot_r, cx + dx + dot_r, cy + dy + dot_r], fill=blue)
+        draw.ellipse([cx - dx - dot_r, cy - dy - dot_r, cx - dx + dot_r, cy - dy + dot_r], fill=red)
+        # simplified trigram bars in each corner (not the exact per-corner patterns)
+        bar_w, bar_h, bar_gap = w * 0.11, h * 0.03, h * 0.045
+        for bx, by, pattern in [(w * 0.14, h * 0.16, (1, 1, 1)), (w * 0.86, h * 0.16, (1, 0, 1)),
+                                 (w * 0.14, h * 0.84, (1, 0, 1)), (w * 0.86, h * 0.84, (1, 1, 1))]:
+            for i, solid in enumerate(pattern):
+                yy = by + (i - 1) * bar_gap
+                if solid:
+                    draw.rectangle([bx - bar_w / 2, yy - bar_h / 2, bx + bar_w / 2, yy + bar_h / 2],
+                                    fill=(20, 20, 20))
+                else:
+                    gap = bar_w * 0.22
+                    draw.rectangle([bx - bar_w / 2, yy - bar_h / 2, bx - gap / 2, yy + bar_h / 2],
+                                    fill=(20, 20, 20))
+                    draw.rectangle([bx + gap / 2, yy - bar_h / 2, bx + bar_w / 2, yy + bar_h / 2],
+                                    fill=(20, 20, 20))
+
+    else:  # "en"
+        draw.rectangle([0, 0, w, h], fill=(1, 33, 105))
+        diag_w = max(2, int(min(w, h) * 0.16))
+        draw.line([(0, 0), (w, h)], fill=(255, 255, 255), width=diag_w)
+        draw.line([(0, h), (w, 0)], fill=(255, 255, 255), width=diag_w)
+        diag_w2 = max(1, int(diag_w * 0.4))
+        draw.line([(0, 0), (w, h)], fill=(200, 16, 46), width=diag_w2)
+        draw.line([(0, h), (w, 0)], fill=(200, 16, 46), width=diag_w2)
+        cross_w = min(w, h) * 0.32
+        draw.rectangle([0, cy - cross_w / 2, w, cy + cross_w / 2], fill=(255, 255, 255))
+        draw.rectangle([cx - cross_w / 2, 0, cx + cross_w / 2, h], fill=(255, 255, 255))
+        cross_w2 = cross_w * 0.5
+        draw.rectangle([0, cy - cross_w2 / 2, w, cy + cross_w2 / 2], fill=(200, 16, 46))
+        draw.rectangle([cx - cross_w2 / 2, 0, cx + cross_w2 / 2, h], fill=(200, 16, 46))
+
+    return img
+
+
 def make_qr_image(url, box_size, verbose=False):
     """Try `qrcode` first, then `reportlab`. Returns a PIL Image or None."""
     try:
@@ -299,7 +378,7 @@ def build_cover(cfg):
     qr_subcaption_font = get_font("medium", 34, fd)[0]
     gauge_pct_font = get_font("black_display", 145, fd)[0]
     gauge_caption_font = get_font("medium", 40, fd)[0]
-    rarity_caption_font = get_font("bold_caps", 50, fd)[0]
+    rarity_caption_font = get_font("medium", 50, fd)[0]
 
     stats = cfg.stats[:2]
 
@@ -361,6 +440,16 @@ def build_cover(cfg):
         tab_y0 = py0 + int(H * 0.0833)
         tab_y1 = py0 + int(H * 0.2111)
         draw.rectangle([px1 - inset - tab_w, tab_y0, px1 - inset, tab_y1], fill=RED)
+
+    if cfg.lang_flag:
+        badge_w = int(W * 0.06)
+        badge_h = int(badge_w * 0.66)
+        badge_x0 = px0 + inset + int(W * 0.018)
+        badge_y0 = py0 + inset + int(H * 0.018)
+        badge = make_flag_badge(badge_w, badge_h, cfg.lang_flag)
+        img.paste(badge, (badge_x0, badge_y0))
+        draw.rectangle([badge_x0, badge_y0, badge_x0 + badge_w, badge_y0 + badge_h],
+                        outline=CARD_BORDER, width=max(2, int(min(badge_w, badge_h) * 0.05)))
 
     # ------------------------------------------------------- layout blocks --
     # Two-pass: pass 1 (render=False) only measures the total content height so
@@ -479,7 +568,7 @@ def build_cover(cfg):
 
         elif cfg.rarity_counts:
             if render:
-                draw_spaced(draw, gcx, row2_top, "RARITY BREAKDOWN", rarity_caption_font, INK, 6)
+                draw_spaced(draw, gcx, row2_top, "RARITY BREAKDOWN", rarity_caption_font, GRAY, 5)
             rows_top = row2_top + int(rarity_caption_font.size * 2.1)
 
             block_half_w = int(W * 0.165)
@@ -863,6 +952,11 @@ def build_arg_parser():
                                                           "default white -- keeps printing ink-cheap")
     p.add_argument("--accent-tab", dest="accent_tab", action=argparse.BooleanOptionalAction,
                     default=True, help="Show/hide the small red accent tab on the right edge")
+    p.add_argument("--lang-flag", dest="lang_flag", default=None, type=str.lower,
+                    choices=sorted(LANG_FLAG_NAMES), metavar="{en,jp,cn,kr}",
+                    help="Show a small language flag badge in the top-left corner: en (English), "
+                         "jp (Japanese), cn (Chinese), or kr (Korean). Off by default; purely a "
+                         "cosmetic label you choose yourself, independent of --name/--name-jp.")
     p.add_argument("--size", type=int, default=3600, help="Canvas size in pixels (square). Default 3600 (=12in @300dpi).")
     p.add_argument("--font-dir", default=None, help="Extra directory to search for fonts first")
     p.add_argument("-o", "--out", default=None,
