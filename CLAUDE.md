@@ -82,15 +82,26 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    `kr`) — four simplified national flags built entirely from primitives
    (ellipses, pieslices, polygons via `_star_points`, rectangles), not image
    assets, so they scale cleanly with `--size` like everything else. It's a
-   purely cosmetic label the user picks themselves, unrelated to the
-   TCGdex-derived `--name`/`--name-jp` (TCGdex itself only has en/ja data).
+   purely cosmetic label the user picks themselves (also sets the default
+   `--footer` text) — unrelated to the TCGdex lookup, which finds Chinese/
+   Korean sets on its own regardless of this flag; there's just no
+   `--name-cn`/`--name-kr` display field the way `--name-jp` exists for
+   Japanese.
 
 3. **Set lookup** (`lookup_set_info`, `_find_set_id`, `_fetch_json`,
    `_format_release_date`, `_is_latin_text`, `list_all_sets`). Queries
-   TCGdex's REST API (`api.tcgdex.net/v2/{lang}/sets...`) by set code first,
-   then by name, checking the Japanese dataset before English (Japan-
-   exclusive sets often aren't in the English one at all). Returns a plain
-   dict of whatever fields it found — callers merge it in only where the
+   TCGdex's REST API (`api.tcgdex.net/v2/{lang}/sets...`) across five
+   datasets — `TCGDEX_LANGS = ("ja", "en", "zh-cn", "zh-tw", "ko")` — by set
+   code first, then by name, in that priority order (Japanese-first so an
+   ambiguous English-name match can't shadow a Japan-exclusive set). Once a
+   set is matched, its detail is fetched from all five languages
+   *concurrently* (`concurrent.futures.ThreadPoolExecutor`, network-bound so
+   threads are fine despite the GIL), and individual fields are extracted
+   via `_first_field(detail, field)`, which prefers `TCGDEX_FIELD_PRIORITY =
+   ("en", "ja", "zh-cn", "zh-tw", "ko")` — English first when more than one
+   dataset has a field, since it's the most standardized, which is a
+   *different* order than the search priority above. Returns a plain dict
+   of whatever fields it found — callers merge it in only where the
    corresponding CLI flag wasn't explicitly given, so any field can be
    overridden by hand. Main Set/Secret Rares stat rows are derived from
    TCGdex's `cardCount` (`official` = main-set count, `total` = grand total
@@ -98,13 +109,16 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    it's checking and found at each step (not gated behind `-v`); `-v` adds
    lower-level HTTP-failure detail on top. `_is_latin_text` guards the
    `era` field specifically, since it's drawn with a Latin-only italic font
-   and a raw Japanese series name would render as tofu boxes. `list_all_sets`
-   (triggered by `--list-sets`) fetches both language datasets, merges them
-   by id, and prints every set found — a standalone path in `main()` that
+   and a raw non-Latin (e.g. Japanese/Chinese/Korean) series name would
+   render as tofu boxes. `list_all_sets` (triggered by `--list-sets`)
+   concurrently fetches all five language datasets (no early-exit benefit
+   to sequential here, since it always needs all of them), merges them by
+   id, and prints every set found — a standalone path in `main()` that
    exits before any `--set`/cover-generation logic runs. `lookup_set_info`
-   also stashes the raw `cards` list from whichever of the en/ja set-detail
-   responses had it (as `_cards`/`_cards_lang`) purely so `--rarity-chart`
-   can reuse it without a second round trip.
+   also stashes the raw `cards` list from whichever language's set-detail
+   response had it first (by `TCGDEX_FIELD_PRIORITY` order, as `_cards`/
+   `_cards_lang`) purely so `--rarity-chart` can reuse it without a second
+   round trip.
 
 4. **Rarity chart** (`fetch_rarity_counts`, `_sort_and_abbreviate_rarities`,
    `_abbreviate_rarity`, `RARITY_ORDER`/`RARITY_ABBREVIATIONS`). TCGdex only
