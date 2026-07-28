@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pokemon TCG Binder Cover Generator
+Pokémon TCG Binder Cover Generator
 -----------------------------------
 Generates a print-ready square binder-cover image (Pokedex-style panel,
 matching the "M2A Mega Brave" / "M5 Abyss Eye" covers) for any set. Set
@@ -677,7 +677,7 @@ def parse_stat(value):
 
 def build_arg_parser():
     p = argparse.ArgumentParser(
-        description="Generate a print-ready Pokemon TCG binder cover (Pokedex-style panel).",
+        description="Generate a print-ready Pokémon TCG binder cover (Pokedex-style panel).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -692,7 +692,7 @@ def build_arg_parser():
     p.add_argument("--set-code", default=None, help='Override the looked-up set code, e.g. "M5"')
     p.add_argument("--name", default=None, help='Override the looked-up English set name, e.g. "Abyss Eye"')
     p.add_argument("--name-jp", default=None, help='Override the looked-up Japanese set name, e.g. "\u30a2\u30d3\u30b9\u30a2\u30a4"')
-    p.add_argument("--game-title", default="Pokemon Card Game")
+    p.add_argument("--game-title", default="Pokémon Card Game")
     p.add_argument("--era", default=None, help="Override the looked-up era/series subheading, "
                                                  'e.g. "Mega Series" or "Scarlet & Violet Era"')
     p.add_argument("--release-date", default=None, help='Override the looked-up release date, e.g. "22 MAY 2026"')
@@ -705,7 +705,7 @@ def build_arg_parser():
     p.add_argument("--completion", default="", help='"collected/total" e.g. "187/187", or a bare percent like "100". '
                                                        "Ignored if --qr-url is given.")
     p.add_argument("--footer", default="Japanese Master Set")
-    p.add_argument("--accent", default="C42A22", help="Hex accent color (no #), default a Pokemon red")
+    p.add_argument("--accent", default="C42A22", help="Hex accent color (no #), default a Pokémon red")
     p.add_argument("--bg-color", default="FFFFFF", help="Hex color (no #) for the area outside the panel, "
                                                           "default white -- keeps printing ink-cheap")
     p.add_argument("--accent-tab", dest="accent_tab", action=argparse.BooleanOptionalAction,

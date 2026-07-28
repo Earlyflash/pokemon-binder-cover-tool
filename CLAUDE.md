@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A single-file CLI tool (`binder_cover.py`) that generates print-ready, square
-Pokemon TCG binder cover images (a "Pokedex"-style panel) as 3600x3600px PNGs.
+Pokémon TCG binder cover images (a "Pokedex"-style panel) as 3600x3600px PNGs.
 Everything — font resolution, TCGdex lookup, QR generation, and pixel-level
 drawing — lives in this one script; there is no package structure and it's
 meant to be run directly. `tests/` holds a stdlib `unittest` suite (see

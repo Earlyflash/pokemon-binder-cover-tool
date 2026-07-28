@@ -1,12 +1,12 @@
-# Pokemon TCG Binder Cover Generator
+# Pokémon TCG Binder Cover Generator
 
 Generates a print-ready, square binder-cover image (the "Pokedex" style panel we
-designed for M2A Mega Brave and M5 Abyss Eye) for any Pokemon TCG set, straight
+designed for M2A Mega Brave and M5 Abyss Eye) for any Pokémon TCG set, straight
 from the command line. No AI calls needed once it's set up.
 
 Set details (code, English/Japanese name, era, release date, total cards) are
 looked up automatically from [TCGdex](https://tcgdex.dev/), a free multilingual
-Pokemon TCG database that covers Japan-exclusive sets -- you just give it the
+Pokémon TCG database that covers Japan-exclusive sets -- you just give it the
 set name or code. This means the tool needs internet access to run; if a set
 isn't in TCGdex yet (e.g. it's brand new) or the lookup gets something wrong,
 you can override any individual field with its own flag.
@@ -76,7 +76,7 @@ Run `python binder_cover.py --help` any time for the full flag list.
 | `--set-code` | no | Override the looked-up set code, e.g. `M5`. |
 | `--name` | no | Override the looked-up English set name, e.g. `Abyss Eye`. |
 | `--name-jp` | no | Override the looked-up Japanese set name, e.g. `アビスアイ`. Skipped if unavailable, or if no CJK font can be found on your system. |
-| `--game-title` | no | Top header line. Default `Pokemon Card Game`. |
+| `--game-title` | no | Top header line. Default `Pokémon Card Game`. |
 | `--era` | no | Override the looked-up era/series subheading, e.g. `Mega Series` or `Scarlet & Violet Era`. Left out if unavailable. |
 | `--release-date` | no | Override the looked-up release date, e.g. `22 MAY 2026`. |
 | `--total-cards` | no | Override the looked-up total card count, e.g. `118`. |

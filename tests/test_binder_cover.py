@@ -354,7 +354,7 @@ class TestMainCli(unittest.TestCase):
 class TestBuildCoverSmoke(unittest.TestCase):
     def _base_cfg(self, **overrides):
         cfg = argparse.Namespace(
-            set_code="M5", name="ABYSS EYE", name_jp="", game_title="Pokemon Card Game",
+            set_code="M5", name="ABYSS EYE", name_jp="", game_title="Pokémon Card Game",
             era="", release_date="22 MAY 2026", total_cards="118",
             stats=[("Main Set", 81), ("Secret Rares", 37)],
             qr_url="", qr_caption="Scan To Track", qr_subcaption="",
