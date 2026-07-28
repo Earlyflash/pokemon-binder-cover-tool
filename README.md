@@ -119,3 +119,13 @@ Run `python binder_cover.py --help` any time for the full flag list.
   quality up to 12x12in -- crop down in any image editor (or your printer's
   driver) to match your actual binder's cover-insert size.
 - Re-run any time a new set drops -- just change `--set`.
+
+## Running tests
+
+```
+python -m unittest discover -s tests -v
+```
+
+The suite mocks all TCGdex network calls, so it runs fast and doesn't need
+internet access. It also runs automatically on every push/PR via GitHub
+Actions (`.github/workflows/tests.yml`).

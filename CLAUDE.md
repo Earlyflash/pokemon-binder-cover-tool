@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A single-file CLI tool (`binder_cover.py`) that generates print-ready, square
 Pokemon TCG binder cover images (a "Pokedex"-style panel) as 3600x3600px PNGs.
-Everything — font resolution, QR generation, and pixel-level drawing — lives
-in this one script. There is no build step, no test suite, and no package
-structure; it's meant to be run directly.
+Everything — font resolution, TCGdex lookup, QR generation, and pixel-level
+drawing — lives in this one script; there is no package structure and it's
+meant to be run directly. `tests/` holds a stdlib `unittest` suite (see
+below) that's also run in CI via `.github/workflows/tests.yml`.
 
 ## Commands
 
@@ -38,8 +39,20 @@ release — search those by set code, not fan translation).
 Debugging font selection: pass `-v/--verbose` to print which font file was
 resolved for each text role (bundled vs. system match vs. not found).
 
-There is no lint/test/build command — verify changes by actually running the
-script and inspecting the output PNG.
+Run tests:
+```
+python -m unittest discover -s tests -v
+```
+The suite mocks every TCGdex network call (via `unittest.mock.patch` on
+`binder_cover._fetch_json`/`lookup_set_info`/`list_all_sets`) so it's fast
+and deterministic in CI — it never hits the real API. `TestBuildCoverSmoke`
+renders actual small (600px) images through the real two-pass layout engine
+to catch layout regressions; there's no pixel-diffing, just size/mode and
+no-exceptions checks. Font-resolution tests only cover the bundled fonts in
+`fonts/`, since CI runners won't have the same system fonts a local machine
+might. There is no separate lint/build command — for anything not covered
+by the tests, verify by actually running the script and inspecting the
+output PNG.
 
 ## Architecture
 
