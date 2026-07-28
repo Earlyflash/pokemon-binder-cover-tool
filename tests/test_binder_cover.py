@@ -7,22 +7,29 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import patch
 
+from PIL import Image
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import binder_cover as bc  # noqa: E402
 
 
 # ---------------------------------------------------------------- helpers --
 
-def fetch_side_effect(ja_listing=None, en_listing=None, details=None):
+def fetch_side_effect(ja_listing=None, en_listing=None, details=None, listings=None):
     """Build a stand-in for binder_cover._fetch_json that never touches the
-    network. `details` maps (lang, set_id) -> detail dict (or None for 404)."""
+    network. `details` maps (lang, set_id) -> detail dict (or None for 404).
+    `listings` maps lang -> set listing, for languages beyond ja/en (any dataset
+    not given here -- e.g. zh-cn/zh-tw/ko when not explicitly under test --
+    simulates an unreachable dataset, same as a real network failure)."""
+    all_listings = dict(listings or {})
+    all_listings.setdefault("ja", ja_listing if ja_listing is not None else [])
+    all_listings.setdefault("en", en_listing if en_listing is not None else [])
     details = details or {}
 
     def _fake_fetch(url, verbose=False):
-        if url == f"{bc.TCGDEX_BASE}/ja/sets":
-            return ja_listing if ja_listing is not None else []
-        if url == f"{bc.TCGDEX_BASE}/en/sets":
-            return en_listing if en_listing is not None else []
+        for lang, listing in all_listings.items():
+            if url == f"{bc.TCGDEX_BASE}/{lang}/sets":
+                return listing
         for (lang, set_id), detail in details.items():
             if url == f"{bc.TCGDEX_BASE}/{lang}/sets/{set_id}":
                 return detail
@@ -163,6 +170,25 @@ class TestFindSetId(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("Multiple TCGdex sets", buf.getvalue())
 
+    @patch("binder_cover._fetch_json")
+    def test_falls_through_to_korean_and_chinese_datasets(self, mock_fetch):
+        # Not in ja/en/zh-cn at all -- only zh-tw and ko have it.
+        mock_fetch.side_effect = fetch_side_effect(
+            ja_listing=[], en_listing=[],
+            listings={"zh-cn": [], "zh-tw": [{"id": "SC2b", "name": "測試"}], "ko": []},
+        )
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(bc._find_set_id("SC2b"), "SC2b")
+
+    @patch("binder_cover._fetch_json")
+    def test_korean_only_name_match(self, mock_fetch):
+        mock_fetch.side_effect = fetch_side_effect(
+            ja_listing=[], en_listing=[],
+            listings={"zh-cn": [], "zh-tw": [], "ko": [{"id": "SM1M", "name": "테스트"}]},
+        )
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(bc._find_set_id("테스트"), "SM1M")
+
 
 class TestLookupSetInfo(unittest.TestCase):
     @patch("binder_cover._fetch_json")
@@ -186,7 +212,7 @@ class TestLookupSetInfo(unittest.TestCase):
         self.assertEqual(info["set_code"], "M5")
         self.assertNotIn("name", info)  # no English release on TCGdex
         self.assertEqual(info["name_jp"], "アビスアイ")
-        self.assertEqual(info["_name_unavailable_jp"], "アビスアイ")
+        self.assertEqual(info["_name_unavailable_local"], ("Japanese", "アビスアイ"))
         self.assertEqual(info["release_date"], "22 MAY 2026")
         self.assertNotIn("era", info)  # non-Latin series name must not be auto-filled
         self.assertEqual(info["total_cards"], 118)
@@ -223,6 +249,52 @@ class TestLookupSetInfo(unittest.TestCase):
             info = bc.lookup_set_info("Nothing Like This Exists")
         self.assertEqual(info, {})
 
+    @patch("binder_cover._fetch_json")
+    def test_traditional_chinese_exclusive_set_falls_back_correctly(self, mock_fetch):
+        # No en/ja/zh-cn/ko detail at all -- only zh-tw, mirroring a real set (SC2b)
+        # that TCGdex only has under Traditional Chinese.
+        zh_tw_listing = [{"id": "SC2b", "name": "測試"}]
+        zh_tw_detail = {
+            "id": "SC2b", "name": "測試", "releaseDate": "2020-08-21",
+            "cardCount": {"official": 144, "total": 144},
+        }
+        mock_fetch.side_effect = fetch_side_effect(
+            ja_listing=[], en_listing=[],
+            listings={"zh-cn": [], "zh-tw": zh_tw_listing, "ko": []},
+            details={("zh-tw", "SC2b"): zh_tw_detail, ("en", "SC2b"): None,
+                      ("ja", "SC2b"): None, ("zh-cn", "SC2b"): None, ("ko", "SC2b"): None},
+        )
+        with redirect_stdout(io.StringIO()):
+            info = bc.lookup_set_info("SC2b")
+
+        self.assertEqual(info["set_code"], "SC2B")
+        self.assertNotIn("name", info)
+        self.assertEqual(info["_name_unavailable_local"], ("Traditional Chinese", "測試"))
+        self.assertEqual(info["release_date"], "21 AUG 2020")
+        self.assertEqual(info["total_cards"], 144)
+        self.assertNotIn("stats", info)  # official == total
+
+    @patch("binder_cover._fetch_json")
+    def test_english_field_priority_beats_search_order_for_extraction(self, mock_fetch):
+        # Matched via the ja-first search order, but once matched, English data (when
+        # present) is still preferred for era/release/cardCount extraction.
+        ja_listing = [{"id": "M5", "name": "アビスアイ"}]
+        ja_detail = {"id": "M5", "name": "アビスアイ", "releaseDate": "2026-01-01",
+                     "cardCount": {"official": 1, "total": 1}}
+        en_detail = {"id": "M5", "name": "Abyss Eye", "releaseDate": "2026-05-22",
+                     "serie": {"name": "Mega Series"}, "cardCount": {"official": 81, "total": 118}}
+        mock_fetch.side_effect = fetch_side_effect(
+            ja_listing=ja_listing, en_listing=[],
+            details={("ja", "M5"): ja_detail, ("en", "M5"): en_detail},
+        )
+        with redirect_stdout(io.StringIO()):
+            info = bc.lookup_set_info("M5")
+
+        self.assertEqual(info["name"], "Abyss Eye")
+        self.assertEqual(info["release_date"], "22 MAY 2026")
+        self.assertEqual(info["era"], "Mega Series")
+        self.assertEqual(info["total_cards"], 118)
+
 
 class TestListAllSets(unittest.TestCase):
     @patch("binder_cover._fetch_json")
@@ -239,6 +311,25 @@ class TestListAllSets(unittest.TestCase):
         self.assertIn("base1", output)
         self.assertIn("Base Set", output)
         self.assertIn("M5", output)
+
+    @patch("binder_cover._fetch_json")
+    def test_merges_chinese_and_korean_datasets_too(self, mock_fetch):
+        mock_fetch.side_effect = fetch_side_effect(
+            ja_listing=[], en_listing=[],
+            listings={
+                "zh-cn": [{"id": "SC1", "name": "简体测试"}],
+                "zh-tw": [{"id": "SC2b", "name": "測試"}],
+                "ko": [{"id": "SM1M", "name": "테스트"}],
+            },
+        )
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            bc.list_all_sets()
+        output = buf.getvalue()
+        self.assertIn("3 sets total", output)
+        self.assertIn("SC1", output)
+        self.assertIn("SC2b", output)
+        self.assertIn("SM1M", output)
 
     @patch("binder_cover._fetch_json")
     def test_total_failure_warns_instead_of_crashing(self, mock_fetch):
@@ -435,6 +526,59 @@ class TestMainCli(unittest.TestCase):
                 os.chdir(prev_cwd)
         mock_fetch_rarity.assert_not_called()
         self.assertIn("skipping the rarity chart", buf.getvalue())
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_default_footer_says_japanese_when_japanese_name_shown(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name_jp": "アビスアイ",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--name", "Abyss Eye", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].footer, "Japanese Master Set")
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_default_footer_says_english_when_no_japanese_name(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "BASE1", "name": "Base Set",
+            "release_date": "9 JAN 1999", "total_cards": 102,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "base1", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].footer, "English Master Set")
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_lang_flag_overrides_default_footer_language(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "BASE1", "name": "Base Set",
+            "release_date": "9 JAN 1999", "total_cards": 102,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "base1", "--lang-flag", "kr", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].footer, "Korean Master Set")
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_explicit_footer_is_not_replaced_by_the_language_default(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name_jp": "アビスアイ",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--name", "Abyss Eye", "--footer", "My Own Footer",
+                         "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].footer, "My Own Footer")
 
     @patch("binder_cover.list_all_sets")
     def test_list_sets_flag_bypasses_set_requirement(self, mock_list_all_sets):

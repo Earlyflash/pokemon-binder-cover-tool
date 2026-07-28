@@ -151,7 +151,7 @@ are omitted since every invocation needs them.
 | Flag | Required? | Description |
 |---|---|---|
 | `--set` | yes, unless `--list-sets` | Set name or code to look up on TCGdex, e.g. `M5` or `"Abyss Eye"`. |
-| `--list-sets` | no | List every set code/name TCGdex knows about (both English and Japanese datasets), then exit without generating a cover. Handy for finding a set's exact code. |
+| `--list-sets` | no | List every set code/name TCGdex knows about (English, Japanese, Simplified Chinese, Traditional Chinese, and Korean datasets), then exit without generating a cover. Handy for finding a set's exact code. |
 | `--qr-url` | no | If set, shows a "scan to track" QR code linking here instead of a completion gauge. |
 | `--set-code` | no | Override the looked-up set code, e.g. `M5`. |
 | `--name` | no | Override the looked-up English set name, e.g. `Abyss Eye`. |
@@ -168,7 +168,7 @@ are omitted since every invocation needs them.
 | `--footer` | no | Bottom banner text next to the Poke Ball icon. Default `Japanese Master Set`. |
 | `--accent` | no | Hex accent color (no `#`), default `C42A22` (Poke Ball red). |
 | `--accent-tab` / `--no-accent-tab` | no | Show/hide the small red tab on the right edge. Default on. |
-| `--lang-flag` | no | Show a small national flag badge in the top-left corner: `en`, `jp`, `cn`, or `kr`. Off by default. Purely a label you choose yourself -- independent of `--name`/`--name-jp`/the TCGdex lookup, since TCGdex itself only covers English and Japanese. |
+| `--lang-flag` | no | Show a small national flag badge in the top-left corner: `en`, `jp`, `cn`, or `kr`. Off by default. Purely a label you choose yourself -- it doesn't affect the lookup (which already searches Chinese/Korean TCGdex datasets on its own; see "Set lookup" below), and there's no `--name-cn`/`--name-kr` display field to fill in the way `--name-jp` does. |
 | `--bg-color` | no | Hex color (no `#`) for the area outside the panel. Default `FFFFFF` (white), so printing doesn't waste ink. |
 | `--size` | no | Canvas size in px (square). Default `3600` (12in @ 300dpi). |
 | `--font-dir` | no | An extra folder to search for fonts first (useful if you want to swap in your own). |
@@ -178,19 +178,29 @@ are omitted since every invocation needs them.
 ## Notes
 
 - **Set lookup**: `--set` is matched against TCGdex first by exact set code,
-  then by set name (Japanese sets are searched first, then English/
-  international). If it can't find a unique match -- the set is too new,
+  then by set name, checked across five TCGdex datasets in this order:
+  Japanese, English, Simplified Chinese, Traditional Chinese, Korean. (Once
+  a set is matched, field *extraction* -- release date, total cards, era,
+  etc -- prefers English data over the others when more than one dataset
+  has it, since it's the most standardized; only the initial search order
+  is Japanese-first, to avoid an English-name match shadowing a Japan-
+  exclusive set.) If it can't find a unique match -- the set is too new,
   the name's ambiguous, or you're offline -- it prints a warning and leaves
   the affected fields blank. Fill in the gaps with `--set-code`, `--name`,
   `--name-jp`, `--era`, `--release-date`, and/or `--total-cards`; the tool
   only hard-fails if `--set-code`/`--name`/`--release-date`/`--total-cards`
   are still missing after the lookup.
-- **Japan-exclusive sets**: for a set that hasn't released in English yet
-  (e.g. `M5`/Abyss Eye), TCGdex only stores its Japanese name -- the English
-  name you know it by is a fan translation that isn't in TCGdex at all.
-  Search by the **set code** (`--set M5`) in that case, not the English
-  name; once the set has an official English release, its name becomes
-  searchable too.
+- **Sets with no English release yet**: for a set that hasn't released in
+  English (e.g. `M5`/Abyss Eye, Japan-exclusive; or a Chinese/Korean-only
+  set), TCGdex only stores its local name -- an English name you know it by
+  is a fan translation that isn't in TCGdex at all. Search by the **set
+  code** (`--set M5`) in that case, not the English name; once the set has
+  an official English release, its name becomes searchable too. `--name-jp`
+  specifically only ever comes from TCGdex's Japanese data -- there's no
+  equivalent `--name-cn`/`--name-kr` display field, so for Chinese/Korean-
+  only sets you'll just need to supply `--name` yourself (the tool will
+  tell you which language it *did* find a name in, e.g. "only its Korean
+  name (...) is available").
 - **QR codes**: install `qrcode[pil]` for the best/lightest QR generation.
   The script also has a `reportlab`-based fallback if that's what you happen
   to have installed instead.
@@ -209,10 +219,11 @@ are omitted since every invocation needs them.
   count, not silently dropped.
 - **Language flag badge** (`--lang-flag`): a small stylized flag drawn in the
   top-left corner (English/Japanese/Chinese/Korean) -- simplified for
-  legibility at that size, not a heraldically exact reproduction. It's just a
-  label for your own binder; TCGdex only has English and Japanese data, so
-  `cn`/`kr` don't pull in any Chinese/Korean set info, they just draw that
-  flag.
+  legibility at that size, not a heraldically exact reproduction. It's just
+  a cosmetic label you choose yourself and sets the default `--footer` text
+  -- it doesn't drive the lookup (which finds Chinese/Korean sets on its
+  own whenever `--set` matches one, flag or no flag) and there's no
+  Chinese/Korean equivalent of `--name-jp` to auto-fill from it.
 - **Long names**: text that's too wide for the card (a long `--name`, a long
   `--footer`, etc.) automatically shrinks to fit -- you don't need to worry
   about it overflowing the panel.

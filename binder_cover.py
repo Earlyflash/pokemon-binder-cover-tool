@@ -41,6 +41,13 @@ import urllib.request
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 TCGDEX_BASE = "https://api.tcgdex.net/v2"
+# Search/lookup order: ja and en first since that's the tool's original/most common
+# use case (Japan-exclusive and English-market sets), then both Chinese datasets
+# (zh-cn/zh-tw are genuinely different TCGdex datasets with different sets, not just
+# a script variant of the same one) and Korean.
+TCGDEX_LANGS = ("ja", "en", "zh-cn", "zh-tw", "ko")
+TCGDEX_LANG_LABELS = {"ja": "Japanese", "en": "English", "zh-cn": "Simplified Chinese",
+                       "zh-tw": "Traditional Chinese", "ko": "Korean"}
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUNDLED_FONTS = os.path.join(SCRIPT_DIR, "fonts")
@@ -666,10 +673,10 @@ def _format_release_date(raw):
 
 
 def _find_set_id(query, verbose=False):
-    """Search TCGdex (Japanese sets first, then English/international) for a set
-    matching `query` by id or by name. Returns the matched set id, or None."""
+    """Search TCGdex (in TCGDEX_LANGS priority order) for a set matching `query` by
+    id or by name. Returns the matched set id, or None."""
     needle = query.strip().lower()
-    for lang in ("ja", "en"):
+    for lang in TCGDEX_LANGS:
         print(f"[lookup] Checking TCGdex's {lang} set list for \"{query}\"...")
         listing = _fetch_json(f"{TCGDEX_BASE}/{lang}/sets", verbose)
         if not listing:
@@ -694,6 +701,23 @@ def _find_set_id(query, verbose=False):
     return None
 
 
+# Field-extraction preference once a set is matched: English data is the most
+# standardized/reliable when available, so it's preferred over the others -- distinct
+# from TCGDEX_LANGS, which is the *search* order (Japanese-first, to avoid an
+# ambiguous English-name match shadowing a Japan-exclusive set).
+TCGDEX_FIELD_PRIORITY = ("en", "ja", "zh-cn", "zh-tw", "ko")
+
+
+def _first_field(detail, field, langs=TCGDEX_FIELD_PRIORITY):
+    """First truthy `field` found across `detail` (a {lang: set-detail dict}), in
+    `langs` priority order."""
+    for lang in langs:
+        value = detail.get(lang, {}).get(field)
+        if value:
+            return value
+    return None
+
+
 def lookup_set_info(query, verbose=False):
     """Look up set metadata on TCGdex (api.tcgdex.net) by set code or name.
     Returns a dict with whatever of set_code/name/name_jp/era/release_date/
@@ -704,51 +728,64 @@ def lookup_set_info(query, verbose=False):
     set_id = _find_set_id(query, verbose)
     if not set_id:
         print(f"[warning] Could not find a TCGdex set matching \"{query}\". If this is a "
-              "Japan-exclusive set that hasn't released in English yet, TCGdex only has "
-              "its Japanese name -- search by the set CODE instead (e.g. \"M5\"), not an "
-              "English fan translation. Otherwise it may just be too new to be indexed "
-              "yet. Either way, fill in the gaps with --set-code/--name/--release-date/"
-              "--total-cards/etc.")
+              "set that hasn't released in English yet (Japan/China/Korea-exclusive), "
+              "TCGdex only has its local name -- search by the set CODE instead (e.g. "
+              "\"M5\"), not an English fan translation. Otherwise it may just be too new "
+              "to be indexed yet. Either way, fill in the gaps with --set-code/--name/"
+              "--release-date/--total-cards/etc.")
         return info
 
-    print(f"[lookup] Fetching English and Japanese detail for set '{set_id}'...")
-    en = _fetch_json(f"{TCGDEX_BASE}/en/sets/{set_id}", verbose) or {}
-    ja = _fetch_json(f"{TCGDEX_BASE}/ja/sets/{set_id}", verbose) or {}
+    print(f"[lookup] Fetching detail for set '{set_id}' across TCGdex's "
+          f"{', '.join(TCGDEX_LANGS)} datasets...")
+    detail = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(TCGDEX_LANGS)) as pool:
+        futures = {pool.submit(_fetch_json, f"{TCGDEX_BASE}/{lang}/sets/{set_id}", verbose): lang
+                   for lang in TCGDEX_LANGS}
+        for future in concurrent.futures.as_completed(futures):
+            detail[futures[future]] = future.result() or {}
+
+    en = detail.get("en", {})
+    ja = detail.get("ja", {})
+    found_in = [TCGDEX_LANG_LABELS[lang] for lang in TCGDEX_LANGS if detail.get(lang)]
     if en:
         print("[lookup] English detail found.")
     else:
-        print(f"[lookup] No English-dataset entry for '{set_id}' (expected for "
-              "Japan-exclusive sets not yet released in English).")
-    if ja:
-        print("[lookup] Japanese detail found.")
+        print(f"[lookup] No English-dataset entry for '{set_id}' (expected for a set "
+              "that hasn't released in English yet).")
+    print(f"[lookup] Detail found in: {', '.join(found_in) if found_in else '(none)'}")
 
-    info["set_code"] = str(en.get("id") or ja.get("id") or set_id).upper()
+    info["set_code"] = str(_first_field(detail, "id") or set_id).upper()
     if en.get("name"):
         info["name"] = en["name"]
     jp_name = ja.get("name")
     if jp_name and jp_name != info.get("name"):
         info["name_jp"] = jp_name
-    if "name" not in info and jp_name:
-        # No English release on TCGdex yet -- flag it so the caller can decide whether
-        # it's actually a problem (i.e. the user didn't already supply --name themselves).
-        info["_name_unavailable_jp"] = jp_name
+    if "name" not in info:
+        # No English release on TCGdex yet -- flag whichever local name we did find, so
+        # the caller can decide whether it's actually a problem (i.e. the user didn't
+        # already supply --name themselves).
+        for lang in TCGDEX_FIELD_PRIORITY[1:]:  # skip "en", already known absent here
+            local_name = detail.get(lang, {}).get("name")
+            if local_name:
+                info["_name_unavailable_local"] = (TCGDEX_LANG_LABELS[lang], local_name)
+                break
 
     # Stashed for --rarity-chart, which needs the set's card list to fetch rarity
     # per-card -- reusing what we already fetched here instead of a redundant round trip.
-    if en.get("cards"):
-        info["_cards"], info["_cards_lang"] = en["cards"], "en"
-    elif ja.get("cards"):
-        info["_cards"], info["_cards_lang"] = ja["cards"], "ja"
+    for lang in TCGDEX_FIELD_PRIORITY:
+        if detail.get(lang, {}).get("cards"):
+            info["_cards"], info["_cards_lang"] = detail[lang]["cards"], lang
+            break
 
-    serie = en.get("serie") or ja.get("serie") or {}
+    serie = _first_field(detail, "serie") or {}
     if isinstance(serie, dict) and serie.get("name") and _is_latin_text(serie["name"]):
         info["era"] = serie["name"]
 
-    release_raw = en.get("releaseDate") or ja.get("releaseDate")
+    release_raw = _first_field(detail, "releaseDate")
     if release_raw:
         info["release_date"] = _format_release_date(release_raw)
 
-    card_count = en.get("cardCount") or ja.get("cardCount") or {}
+    card_count = _first_field(detail, "cardCount")
     if isinstance(card_count, dict):
         # `total` includes secret rares/alt arts; `official` is just the printed/main-set
         # count -- --total-cards on this tool has always meant the grand total (e.g. 118
@@ -779,17 +816,27 @@ def lookup_set_info(query, verbose=False):
 
 
 def list_all_sets(verbose=False):
-    """Print every set TCGdex knows about (id, English name if any, Japanese name if
-    any), merged across both datasets and sorted by id. Used by --list-sets."""
+    """Print every set TCGdex knows about (id + name in whichever of TCGDEX_LANGS have
+    it), merged across all datasets and sorted by id. Used by --list-sets. Fetched
+    concurrently since (unlike a single lookup) every dataset is needed regardless."""
+    print(f"[lookup] Fetching set lists from TCGdex's {', '.join(TCGDEX_LANGS)} "
+          "datasets...")
+    listings = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(TCGDEX_LANGS)) as pool:
+        futures = {pool.submit(_fetch_json, f"{TCGDEX_BASE}/{lang}/sets", verbose): lang
+                   for lang in TCGDEX_LANGS}
+        for future in concurrent.futures.as_completed(futures):
+            lang = futures[future]
+            listing = future.result()
+            if listing:
+                print(f"[lookup] Got {len(listing)} sets from the {lang} dataset.")
+                listings[lang] = listing
+            else:
+                print(f"[warning] Couldn't fetch TCGdex's {lang} set list.")
+
     combined = {}
-    for lang in ("ja", "en"):
-        print(f"[lookup] Fetching the {lang} set list from TCGdex...")
-        listing = _fetch_json(f"{TCGDEX_BASE}/{lang}/sets", verbose)
-        if not listing:
-            print(f"[warning] Couldn't fetch TCGdex's {lang} set list.")
-            continue
-        print(f"[lookup] Got {len(listing)} sets from the {lang} dataset.")
-        for s in listing:
+    for lang in TCGDEX_LANGS:
+        for s in listings.get(lang, []):
             sid = s.get("id")
             if not sid:
                 continue
@@ -802,7 +849,7 @@ def list_all_sets(verbose=False):
     print(f"\n{len(combined)} sets total:\n")
     for sid in sorted(combined, key=str.lower):
         names = combined[sid]
-        shown = " / ".join(n for n in (names.get("en"), names.get("ja")) if n)
+        shown = " / ".join(names[lang] for lang in TCGDEX_LANGS if names.get(lang))
         print(f"{sid:<10} {shown or '(no name)'}")
 
 
@@ -946,7 +993,11 @@ def build_arg_parser():
                          "QR code or completion gauge (only shown if neither is given). Fetches "
                          "every card's rarity from TCGdex individually, so this is slower -- "
                          "opt-in rather than automatic.")
-    p.add_argument("--footer", default="Japanese Master Set")
+    p.add_argument("--footer", default=None,
+                    help="Bottom banner text next to the Poke Ball icon. Defaults to "
+                         "\"<Language> Master Set\", where <Language> comes from --lang-flag "
+                         "if given, otherwise Japanese if the cover shows a Japanese name and "
+                         "English if not.")
     p.add_argument("--accent", default="C42A22", help="Hex accent color (no #), default a Pokémon red")
     p.add_argument("--bg-color", default="FFFFFF", help="Hex color (no #) for the area outside the panel, "
                                                           "default white -- keeps printing ink-cheap")
@@ -995,10 +1046,18 @@ def main(argv=None):
         args.stats = looked_up["stats"]
     args.name_jp = args.name_jp or ""
     args.era = args.era or ""
+    lang_tag = "JP" if args.name_jp else "EN"
 
-    if not had_name and looked_up.get("_name_unavailable_jp"):
+    if args.footer is None:
+        if args.lang_flag:
+            args.footer = f"{LANG_FLAG_NAMES[args.lang_flag]} Master Set"
+        else:
+            args.footer = "Japanese Master Set" if lang_tag == "JP" else "English Master Set"
+
+    if not had_name and looked_up.get("_name_unavailable_local"):
+        lang_label, local_name = looked_up["_name_unavailable_local"]
         print(f"[note] '{args.set_query}' has no English release on TCGdex yet -- only "
-              f"its Japanese name ({looked_up['_name_unavailable_jp']}) is available. "
+              f"its {lang_label} name ({local_name}) is available. "
               f"Pass --name yourself, e.g. --name \"{args.set_query}\", for the English "
               "display text.")
 
@@ -1021,7 +1080,6 @@ def main(argv=None):
 
     if not args.out:
         safe_name = "".join(c if c.isalnum() else "_" for c in args.name).strip("_")
-        lang_tag = "JP" if args.name_jp else "EN"
         args.out = f"{args.set_code}_{safe_name}_{lang_tag}_cover.png"
 
     img = build_cover(args)
