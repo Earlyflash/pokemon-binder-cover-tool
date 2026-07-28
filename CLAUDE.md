@@ -68,19 +68,22 @@ Everything is in `binder_cover.py`, organized into four sections (see the
    chain.
 
 3. **Set lookup** (`lookup_set_info`, `_find_set_id`, `_fetch_json`,
-   `_format_release_date`, `_is_latin_text`). Queries TCGdex's REST API
-   (`api.tcgdex.net/v2/{lang}/sets...`) by set code first, then by name,
-   checking the Japanese dataset before English (Japan-exclusive sets often
-   aren't in the English one at all). Returns a plain dict of whatever
-   fields it found — callers merge it in only where the corresponding CLI
-   flag wasn't explicitly given, so any field can be overridden by hand.
-   Main Set/Secret Rares stat rows are derived from TCGdex's `cardCount`
-   (`official` = main-set count, `total` = grand total including secret
-   rares/alt arts). Prints a running commentary of what it's checking and
-   found at each step (not gated behind `-v`); `-v` adds lower-level
-   HTTP-failure detail on top. `_is_latin_text` guards the `era` field
-   specifically, since it's drawn with a Latin-only italic font and a raw
-   Japanese series name would render as tofu boxes.
+   `_format_release_date`, `_is_latin_text`, `list_all_sets`). Queries
+   TCGdex's REST API (`api.tcgdex.net/v2/{lang}/sets...`) by set code first,
+   then by name, checking the Japanese dataset before English (Japan-
+   exclusive sets often aren't in the English one at all). Returns a plain
+   dict of whatever fields it found — callers merge it in only where the
+   corresponding CLI flag wasn't explicitly given, so any field can be
+   overridden by hand. Main Set/Secret Rares stat rows are derived from
+   TCGdex's `cardCount` (`official` = main-set count, `total` = grand total
+   including secret rares/alt arts). Prints a running commentary of what
+   it's checking and found at each step (not gated behind `-v`); `-v` adds
+   lower-level HTTP-failure detail on top. `_is_latin_text` guards the
+   `era` field specifically, since it's drawn with a Latin-only italic font
+   and a raw Japanese series name would render as tofu boxes. `list_all_sets`
+   (triggered by `--list-sets`) fetches both language datasets, merges them
+   by id, and prints every set found — a standalone path in `main()` that
+   exits before any `--set`/cover-generation logic runs.
 
 4. **`build_cover(cfg)`** — the actual layout engine, driven by a single
    `argparse.Namespace` (`cfg`) of CLI flags. All positions/sizes are

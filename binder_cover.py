@@ -638,6 +638,34 @@ def lookup_set_info(query, verbose=False):
     return info
 
 
+def list_all_sets(verbose=False):
+    """Print every set TCGdex knows about (id, English name if any, Japanese name if
+    any), merged across both datasets and sorted by id. Used by --list-sets."""
+    combined = {}
+    for lang in ("ja", "en"):
+        print(f"[lookup] Fetching the {lang} set list from TCGdex...")
+        listing = _fetch_json(f"{TCGDEX_BASE}/{lang}/sets", verbose)
+        if not listing:
+            print(f"[warning] Couldn't fetch TCGdex's {lang} set list.")
+            continue
+        print(f"[lookup] Got {len(listing)} sets from the {lang} dataset.")
+        for s in listing:
+            sid = s.get("id")
+            if not sid:
+                continue
+            combined.setdefault(sid, {})[lang] = s.get("name", "")
+
+    if not combined:
+        print("[warning] Couldn't reach TCGdex at all -- check your internet connection.")
+        return
+
+    print(f"\n{len(combined)} sets total:\n")
+    for sid in sorted(combined, key=str.lower):
+        names = combined[sid]
+        shown = " / ".join(n for n in (names.get("en"), names.get("ja")) if n)
+        print(f"{sid:<10} {shown or '(no name)'}")
+
+
 # --------------------------------------------------------------------- CLI --
 
 def parse_stat(value):
@@ -653,8 +681,12 @@ def build_arg_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    p.add_argument("--set", dest="set_query", required=True,
-                    help='Set to look up on TCGdex, by code or name, e.g. "M5" or "Abyss Eye"')
+    p.add_argument("--set", dest="set_query", default=None,
+                    help='Set to look up on TCGdex, by code or name, e.g. "M5" or "Abyss Eye". '
+                         "Required unless --list-sets is given.")
+    p.add_argument("--list-sets", action="store_true",
+                    help="List every set code/name TCGdex knows about, then exit without "
+                         "generating a cover")
     p.add_argument("--qr-url", default="", help="If set, shows a QR code linking here instead of a completion gauge")
 
     p.add_argument("--set-code", default=None, help='Override the looked-up set code, e.g. "M5"')
@@ -698,6 +730,13 @@ def main(argv=None):
 
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+
+    if args.list_sets:
+        list_all_sets(verbose=args.verbose)
+        return
+    if not args.set_query:
+        parser.error("--set is required (or use --list-sets to browse available sets)")
+
     args.stats = [tuple(s) for s in args.stat]
 
     had_name = args.name is not None

@@ -37,25 +37,29 @@ wasting ink printing a dark background.
 
 ## Basic usage
 
+Not sure what a set's TCGdex code is, or whether it's indexed at all? List
+everything TCGdex knows about first:
+
 ```
-python binder_cover.py --set M5 \
-  --stat "Main Set" 81 --stat "Secret Rares" 37 \
+python binder_cover.py --list-sets
+```
+
+```
+python binder_cover.py --set M5 --name "Abyss Eye" \
   --qr-url "https://rarecandy.com/pokemon/sets/abyss-eye?username=Earlyflash" \
   --qr-subcaption "My Collection" \
   --out M5_Abyss_Eye_cover.png
 ```
 
-`--set` also accepts a name instead of a code:
-
-```
-python binder_cover.py --set "Abyss Eye" --out M5_Abyss_Eye_cover.png
-```
+(`--name` is needed here because M5 hasn't released in English yet, so
+TCGdex only has its Japanese name -- see "Japan-exclusive sets" below.
+Everything else -- release date, total cards, the Main Set/Secret Rares
+split -- comes from the lookup.)
 
 Or the completion-gauge style (no QR code), like the original M2A cover:
 
 ```
-python binder_cover.py --set M2A \
-  --stat "Secret Rares" "—" \
+python binder_cover.py --set M2A --name "Mega Brave" \
   --completion "187/187" \
   --out M2A_Mega_Brave_cover.png
 ```
@@ -66,7 +70,8 @@ Run `python binder_cover.py --help` any time for the full flag list.
 
 | Flag | Required? | Description |
 |---|---|---|
-| `--set` | yes | Set name or code to look up on TCGdex, e.g. `M5` or `"Abyss Eye"`. |
+| `--set` | yes, unless `--list-sets` | Set name or code to look up on TCGdex, e.g. `M5` or `"Abyss Eye"`. |
+| `--list-sets` | no | List every set code/name TCGdex knows about (both English and Japanese datasets), then exit without generating a cover. Handy for finding a set's exact code. |
 | `--qr-url` | no | If set, shows a "scan to track" QR code linking here instead of a completion gauge. |
 | `--set-code` | no | Override the looked-up set code, e.g. `M5`. |
 | `--name` | no | Override the looked-up English set name, e.g. `Abyss Eye`. |
