@@ -52,9 +52,9 @@ python binder_cover.py --set M5 --name "Abyss Eye" \
 ```
 
 (`--name` is needed here because M5 hasn't released in English yet, so
-TCGdex only has its Japanese name -- see "Japan-exclusive sets" below.
-Everything else -- release date, total cards, the Main Set/Secret Rares
-split -- comes from the lookup.)
+TCGdex only has its Japanese name -- see "Sets with no English release yet"
+below. Everything else -- release date, total cards, the Main Set/Secret
+Rares split -- comes from the lookup.)
 
 Or the completion-gauge style (no QR code), like the original M2A cover:
 
@@ -165,7 +165,7 @@ are omitted since every invocation needs them.
 | `--qr-subcaption` | no | Small text below the QR code, e.g. `My Collection`. |
 | `--completion` | no | `collected/total` (e.g. `187/187`) or a bare percent (e.g. `100`). Draws a circular gauge. Ignored if `--qr-url` is also given. Your own collection progress, so always manual. |
 | `--rarity-chart` | no | Shows a Common/Uncommon/Rare/etc. distribution chart in the right column instead of the QR code or completion gauge -- only appears if neither `--qr-url` nor `--completion` is given. Fetches every card's rarity from TCGdex individually (one request per card), so it's opt-in rather than automatic; see "Rarity charts" below. |
-| `--footer` | no | Bottom banner text next to the Poke Ball icon. Default `Japanese Master Set`. |
+| `--footer` | no | Bottom banner text next to the Poke Ball icon. Defaults to `"<Language> Master Set"` -- `<Language>` comes from `--lang-flag` if given, otherwise Japanese if the cover shows a Japanese name and English if not. |
 | `--accent` | no | Hex accent color (no `#`), default `C42A22` (Poke Ball red). |
 | `--accent-tab` / `--no-accent-tab` | no | Show/hide the small red tab on the right edge. Default on. |
 | `--lang-flag` | no | Show a small national flag badge in the top-left corner: `en`, `jp`, `cn`, or `kr`. Off by default. Purely a label you choose yourself -- it doesn't affect the lookup (which already searches Chinese/Korean TCGdex datasets on its own; see "Set lookup" below), and there's no `--name-cn`/`--name-kr` display field to fill in the way `--name-jp` does. |

@@ -30,6 +30,7 @@ Optional:  pip install "qrcode[pil]"   (for the --qr-url option)
 import argparse
 import concurrent.futures
 import datetime
+import http.client
 import json
 import math
 import os
@@ -370,8 +371,10 @@ def build_cover(cfg):
     f_name = fit_font("black_display", cfg.name.upper(), 198, content_w, 60, fd, spacing=10)
     f_jp, jp_ok = (None, False)
     if cfg.name_jp:
-        f_jp, jp_ok = get_font("japanese", 116, fd, verbose=cfg.verbose)
-        if not jp_ok:
+        _, jp_ok = get_font("japanese", 116, fd, verbose=cfg.verbose)
+        if jp_ok:
+            f_jp = fit_font("japanese", cfg.name_jp, 116, content_w, 40, fd)
+        else:
             print("[warning] No Japanese-capable font found on this system -- the "
                   "Japanese set name will be skipped. Install a CJK font (Windows/Mac "
                   "already ship one; on Linux try 'fonts-noto-cjk') or pass --font-dir.")
@@ -516,31 +519,45 @@ def build_cover(cfg):
         row2_top = y
 
         # ---- left column: up to 2 stats ----
+        # Label/value text is fully user-controlled (--stat), so it's fit to the
+        # available column width just like every other headline text -- lbl2_font/
+        # val2_font stay the sizing basis for vertical rhythm either way.
+        stat_max_w = cx - content_x0 - int(W * 0.02)
         left_bottom = row2_top
         if len(stats) == 1:
             label, value = stats[0]
             mid = row2_top + int(W * 0.075)
+            f_lbl = fit_font("medium", label.upper(), lbl2_font.size, stat_max_w, 20, fd)
+            f_val = fit_font("bold_display", str(value), val2_font.size, stat_max_w, 30, fd)
             if render:
-                draw.text((content_x0, mid - lbl2_font.size - 10), label.upper(), font=lbl2_font, fill=GRAY, anchor="la")
-                draw.text((content_x0, mid), str(value), font=val2_font, fill=INK, anchor="la")
+                draw.text((content_x0, mid - lbl2_font.size - 10), label.upper(), font=f_lbl, fill=GRAY, anchor="la")
+                draw.text((content_x0, mid), str(value), font=f_val, fill=INK, anchor="la")
             left_bottom = mid + int(val2_font.size * 1.3)
         elif len(stats) == 2:
             (l1, v1), (l2, v2) = stats
+            f_lbl1 = fit_font("medium", l1.upper(), lbl2_font.size, stat_max_w, 20, fd)
+            f_val1 = fit_font("bold_display", str(v1), val2_font.size, stat_max_w, 30, fd)
+            f_lbl2 = fit_font("medium", l2.upper(), lbl2_font.size, stat_max_w, 20, fd)
+            f_val2 = fit_font("bold_display", str(v2), val2_font.size, stat_max_w, 30, fd)
             if render:
-                draw.text((content_x0, row2_top), l1.upper(), font=lbl2_font, fill=GRAY, anchor="la")
-                draw.text((content_x0, row2_top + int(lbl2_font.size * 1.96)), str(v1), font=val2_font, fill=INK, anchor="la")
+                draw.text((content_x0, row2_top), l1.upper(), font=f_lbl1, fill=GRAY, anchor="la")
+                draw.text((content_x0, row2_top + int(lbl2_font.size * 1.96)), str(v1), font=f_val1, fill=INK, anchor="la")
                 second_y = row2_top + int(W * 0.0806)
-                draw.text((content_x0, second_y), l2.upper(), font=lbl2_font, fill=GRAY, anchor="la")
-                draw.text((content_x0, second_y + int(lbl2_font.size * 1.96)), str(v2), font=val2_font, fill=INK, anchor="la")
+                draw.text((content_x0, second_y), l2.upper(), font=f_lbl2, fill=GRAY, anchor="la")
+                draw.text((content_x0, second_y + int(lbl2_font.size * 1.96)), str(v2), font=f_val2, fill=INK, anchor="la")
             left_bottom = row2_top + int(W * 0.0806) + int(lbl2_font.size * 1.96) + int(val2_font.size * 1.3)
 
         # ---- right column: QR / gauge / blank ----
         gcx = cx + (content_x1 - cx) * 0.62
         right_bottom = row2_top
 
+        qr_col_max_w = content_x1 - cx
         if qr_img is not None:
+            qr_caption_text = cfg.qr_caption.upper()
+            f_qr_caption = fit_font("bold_caps", qr_caption_text, qr_caption_font.size,
+                                     qr_col_max_w, 26, fd, spacing=6)
             if render:
-                draw_spaced(draw, gcx, row2_top, cfg.qr_caption.upper(), qr_caption_font, INK, 6)
+                draw_spaced(draw, gcx, row2_top, qr_caption_text, f_qr_caption, INK, 6)
             box_top = row2_top + int(qr_caption_font.size * 2.1)
             qr_pad = int(qr_size * 0.047)
             box_half = qr_size / 2 + qr_pad
@@ -550,9 +567,12 @@ def build_cover(cfg):
                 img.paste(qr_img, (int(gcx - qr_size / 2), int(box_top + qr_pad)))
             right_bottom = box_top + qr_size + 2 * qr_pad
             if cfg.qr_subcaption:
+                qr_subcaption_text = cfg.qr_subcaption.upper()
+                f_qr_subcaption = fit_font("medium", qr_subcaption_text, qr_subcaption_font.size,
+                                            qr_col_max_w, 18, fd, spacing=6)
                 sub_y = right_bottom + int(W * 0.0111)
                 if render:
-                    draw_spaced(draw, gcx, sub_y, cfg.qr_subcaption.upper(), qr_subcaption_font, GRAY, 6)
+                    draw_spaced(draw, gcx, sub_y, qr_subcaption_text, f_qr_subcaption, GRAY, 6)
                 right_bottom = sub_y + int(qr_subcaption_font.size * 1.3)
 
         elif completion is not None:
@@ -644,7 +664,13 @@ def _fetch_json(url, verbose=False):
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+    # OSError covers urllib.error.URLError (a subclass) as well as raw socket-level
+    # failures (timeouts, connection resets) that urlopen doesn't always wrap in
+    # URLError; http.client.HTTPException/UnicodeDecodeError cover malformed or
+    # truncated responses. Runs inside ThreadPoolExecutor workers elsewhere in this
+    # file, so anything not caught here surfaces as a raw crash via future.result()
+    # instead of the graceful "[warning] ..." degradation the rest of the tool has.
+    except (OSError, http.client.HTTPException, json.JSONDecodeError, UnicodeDecodeError) as e:
         if verbose:
             print(f"[lookup] GET {url} failed: {e}")
         return None
@@ -697,7 +723,9 @@ def _find_set_id(query, verbose=False):
             print(f"[warning] Multiple TCGdex sets ({lang}) match \"{query}\": {shown}. "
                   "Try a more specific --set value, or fill in the gaps with --set-code/"
                   "--name/etc.")
-            return None
+            # Ambiguous in this language doesn't mean ambiguous everywhere -- keep
+            # checking the remaining languages for an exact/unique match instead of
+            # giving up here.
     return None
 
 
@@ -951,13 +979,6 @@ def fetch_rarity_counts(cards, lang, verbose=False):
 
 
 # --------------------------------------------------------------------- CLI --
-
-def parse_stat(value):
-    parts = value
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError("--stat needs exactly two values: LABEL VALUE")
-    return tuple(parts)
-
 
 def build_arg_parser():
     p = argparse.ArgumentParser(
