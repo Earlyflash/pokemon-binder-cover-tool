@@ -32,9 +32,10 @@ cards/main-secret-rare split; any of those can still be overridden with
 their own flag (`--name`, `--release-date`, etc.) when TCGdex has it wrong
 or doesn't have the set yet. This means the tool needs internet access by
 default. See README.md for the full example invocations (QR-code style vs.
-completion-gauge style), the full flag table, and the Japan-exclusive-set
-caveats (TCGdex only indexes a set's English name once it has an English
-release — search those by set code, not fan translation).
+completion-gauge style), the full flag table, and the "Sets with no English
+release yet" caveats (TCGdex only indexes a set's English name once it has
+an English release — search those by set code, not fan translation; applies
+to Japan/China/Korea-exclusive sets alike, not just Japanese ones).
 
 Debugging font selection: pass `-v/--verbose` to print which font file was
 resolved for each text role (bundled vs. system match vs. not found).

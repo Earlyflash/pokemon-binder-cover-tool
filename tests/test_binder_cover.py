@@ -65,6 +65,38 @@ class TestFormatReleaseDate(unittest.TestCase):
         self.assertEqual(bc._format_release_date("not a date"), "NOT A DATE")
 
 
+class TestFetchJson(unittest.TestCase):
+    """_fetch_json runs inside ThreadPoolExecutor workers elsewhere in the file, so
+    every plausible network failure mode must degrade to None, not raise -- an
+    uncaught exception here would surface as a raw crash via future.result()."""
+
+    def _assert_degrades_to_none(self, exc):
+        with patch("urllib.request.urlopen", side_effect=exc):
+            self.assertIsNone(bc._fetch_json("https://example.com/x"))
+
+    def test_url_error_returns_none(self):
+        import urllib.error
+        self._assert_degrades_to_none(urllib.error.URLError("no route"))
+
+    def test_socket_timeout_returns_none(self):
+        self._assert_degrades_to_none(TimeoutError("timed out"))
+
+    def test_connection_reset_returns_none(self):
+        self._assert_degrades_to_none(ConnectionResetError("connection reset"))
+
+    def test_incomplete_http_read_returns_none(self):
+        import http.client
+        self._assert_degrades_to_none(http.client.IncompleteRead(b""))
+
+    def test_malformed_json_returns_none(self):
+        from unittest.mock import MagicMock
+        resp = MagicMock()
+        resp.read.return_value = b"not json"
+        resp.__enter__.return_value = resp
+        with patch("urllib.request.urlopen", return_value=resp):
+            self.assertIsNone(bc._fetch_json("https://example.com/x"))
+
+
 class TestIsLatinText(unittest.TestCase):
     def test_ascii_is_latin(self):
         self.assertTrue(bc._is_latin_text("Mega Series"))
@@ -74,15 +106,6 @@ class TestIsLatinText(unittest.TestCase):
 
     def test_latin1_accented_is_latin(self):
         self.assertTrue(bc._is_latin_text("Café"))
-
-
-class TestParseStat(unittest.TestCase):
-    def test_valid_pair(self):
-        self.assertEqual(bc.parse_stat(["Secret Rares", "37"]), ("Secret Rares", "37"))
-
-    def test_wrong_length_raises(self):
-        with self.assertRaises(argparse.ArgumentTypeError):
-            bc.parse_stat(["only one"])
 
 
 # --------------------------------------------------------- fonts/drawing --
@@ -624,6 +647,17 @@ class TestBuildCoverSmoke(unittest.TestCase):
         img = bc.build_cover(self._base_cfg())
         self.assertEqual(img.size, (600, 600))
         self.assertEqual(img.mode, "RGB")
+
+    def test_renders_with_japanese_name(self):
+        # Whether a CJK font is actually available is environment-dependent (no CJK
+        # font is bundled), so this exercises either the real dual-name draw path or
+        # the "no CJK font found, skip it" warning path -- either way, no exceptions.
+        img = bc.build_cover(self._base_cfg(name_jp="アビスアイ"))
+        self.assertEqual(img.size, (600, 600))
+
+    def test_renders_with_era_subheading(self):
+        img = bc.build_cover(self._base_cfg(era="Mega Series"))
+        self.assertEqual(img.size, (600, 600))
 
     def test_renders_with_qr_code(self):
         img = bc.build_cover(self._base_cfg(qr_url="https://example.com/abyss-eye"))
