@@ -461,6 +461,12 @@ class TestArgParser(unittest.TestCase):
         self.assertTrue(parser.parse_args(["--set", "M5"]).accent_tab)
         self.assertFalse(parser.parse_args(["--set", "M5", "--no-accent-tab"]).accent_tab)
 
+    def test_paper_defaults_to_square_and_size_defaults_to_none(self):
+        parser = bc.build_arg_parser()
+        args = parser.parse_args(["--set", "M5"])
+        self.assertEqual(args.paper, "square")
+        self.assertIsNone(args.size)
+
 
 class TestMainCli(unittest.TestCase):
     def test_neither_set_nor_list_sets_exits_with_error(self):
@@ -609,6 +615,126 @@ class TestMainCli(unittest.TestCase):
         mock_list_all_sets.assert_called_once()
 
     @patch("binder_cover.lookup_set_info")
+    def test_set2_looks_up_second_set_and_fills_dual_fields(self, mock_lookup):
+        mock_lookup.side_effect = [
+            {"set_code": "M3", "name_jp": "ムニキスゼロ",
+             "release_date": "23 JAN 2026", "total_cards": 117},
+            {"set_code": "M4", "name_jp": "ニンジャスピナー",
+             "release_date": "13 MAR 2026", "total_cards": 120},
+        ]
+        captured = {}
+        real_build_cover = bc.build_cover
+
+        def spy_build_cover(cfg):
+            captured["cfg"] = cfg
+            return real_build_cover(cfg)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("binder_cover.build_cover", side_effect=spy_build_cover):
+                with redirect_stdout(io.StringIO()):
+                    bc.main(["--set", "M3", "--name", "Nihil Zero",
+                             "--set2", "M4", "--name2", "Ninja Spinner",
+                             "--out", os.path.join(tmp, "x.png"), "--size", "300"])
+
+        self.assertEqual(mock_lookup.call_args_list[1].args[0], "M4")
+        cfg = captured["cfg"]
+        self.assertEqual(cfg.set_code2, "M4")
+        self.assertEqual(cfg.name2, "Ninja Spinner")
+        self.assertEqual(cfg.name_jp2, "ニンジャスピナー")
+        self.assertEqual(cfg.release_date2, "13 MAR 2026")
+        self.assertEqual(cfg.total_cards2, "120")
+
+    @patch("binder_cover.lookup_set_info")
+    def test_set2_missing_fields_exits_with_error(self, mock_lookup):
+        mock_lookup.side_effect = [
+            {"set_code": "M3", "name": "Nihil Zero",
+             "release_date": "23 JAN 2026", "total_cards": 117},
+            {},
+        ]
+        buf_err = io.StringIO()
+        with self.assertRaises(SystemExit):
+            with redirect_stdout(io.StringIO()), redirect_stderr(buf_err):
+                bc.main(["--set", "M3", "--set2", "Nonexistent Set2"])
+        self.assertIn("couldn't determine", buf_err.getvalue())
+        self.assertIn("--set2", buf_err.getvalue())
+
+    @patch("binder_cover.lookup_set_info")
+    def test_set2_uses_combined_default_output_filename(self, mock_lookup):
+        mock_lookup.side_effect = [
+            {"set_code": "M3", "name": "Nihil Zero",
+             "release_date": "23 JAN 2026", "total_cards": 117},
+            {"set_code": "M4", "name": "Ninja Spinner",
+             "release_date": "13 MAR 2026", "total_cards": 120},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            prev_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(io.StringIO()):
+                    bc.main(["--set", "M3", "--set2", "M4", "--size", "300"])
+                self.assertTrue(os.path.isfile("M3_M4_dual_cover.png"))
+            finally:
+                os.chdir(prev_cwd)
+
+    @patch("binder_cover.fetch_rarity_counts")
+    @patch("binder_cover.lookup_set_info")
+    def test_rarity_chart_flag_with_set2_fetches_both_sets(self, mock_lookup, mock_fetch_rarity):
+        mock_lookup.side_effect = [
+            {"set_code": "M3", "name": "Nihil Zero", "release_date": "23 JAN 2026",
+             "total_cards": 117, "_cards": [{"id": "M3-001"}], "_cards_lang": "ja"},
+            {"set_code": "M4", "name": "Ninja Spinner", "release_date": "13 MAR 2026",
+             "total_cards": 120, "_cards": [{"id": "M4-001"}], "_cards_lang": "ja"},
+        ]
+        mock_fetch_rarity.side_effect = [[("C", 1)], [("U", 1)]]
+        captured = {}
+        real_build_cover = bc.build_cover
+
+        def spy_build_cover(cfg):
+            captured["cfg"] = cfg
+            return real_build_cover(cfg)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("binder_cover.build_cover", side_effect=spy_build_cover):
+                with redirect_stdout(io.StringIO()):
+                    bc.main(["--set", "M3", "--set2", "M4", "--rarity-chart",
+                             "--out", os.path.join(tmp, "x.png"), "--size", "300"])
+
+        self.assertEqual(mock_fetch_rarity.call_args_list[0].args, ([{"id": "M3-001"}], "ja"))
+        self.assertEqual(mock_fetch_rarity.call_args_list[1].args, ([{"id": "M4-001"}], "ja"))
+        self.assertEqual(captured["cfg"].rarity_counts, [("C", 1)])
+        self.assertEqual(captured["cfg"].rarity_counts2, [("U", 1)])
+
+    @patch("binder_cover.fetch_rarity_counts")
+    @patch("binder_cover.lookup_set_info")
+    def test_rarity_chart_flag_with_set2_and_no_card_list_warns_and_skips_second(
+            self, mock_lookup, mock_fetch_rarity):
+        mock_lookup.side_effect = [
+            {"set_code": "M3", "name": "Nihil Zero", "release_date": "23 JAN 2026",
+             "total_cards": 117, "_cards": [{"id": "M3-001"}], "_cards_lang": "ja"},
+            {"set_code": "M4", "name": "Ninja Spinner", "release_date": "13 MAR 2026",
+             "total_cards": 120},
+        ]
+        mock_fetch_rarity.return_value = [("C", 1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                bc.main(["--set", "M3", "--set2", "M4", "--rarity-chart",
+                         "--out", os.path.join(tmp, "x.png"), "--size", "300"])
+        mock_fetch_rarity.assert_called_once()
+        self.assertIn("skipping the second rarity chart", buf.getvalue())
+
+    @patch("binder_cover.lookup_set_info")
+    def test_without_set2_dual_fields_stay_unset(self, mock_lookup):
+        mock_lookup.return_value = {
+            "set_code": "BASE1", "name": "Base Set",
+            "release_date": "9 JAN 1999", "total_cards": 102,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "base1", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_lookup.call_count, 1)
+
+    @patch("binder_cover.lookup_set_info")
     def test_explicit_overrides_are_not_replaced_by_lookup(self, mock_lookup):
         mock_lookup.return_value = {
             "set_code": "M5", "name": "Should Not Be Used",
@@ -625,6 +751,59 @@ class TestMainCli(unittest.TestCase):
                 self.assertTrue(os.path.isfile("M5_My_Own_Name_EN_cover.png"))
             finally:
                 os.chdir(prev_cwd)
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_paper_a5_defaults_size_to_1748_when_not_given(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name": "Abyss Eye",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--paper", "a5", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].size, 1748)
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_paper_a5_landscape_also_defaults_size_to_1748(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name": "Abyss Eye",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--paper", "a5-landscape", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].size, 1748)
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_paper_square_still_defaults_size_to_3600(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name": "Abyss Eye",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].size, 3600)
+
+    @patch("binder_cover.build_cover")
+    @patch("binder_cover.lookup_set_info")
+    def test_explicit_size_overrides_the_paper_default(self, mock_lookup, mock_build):
+        mock_lookup.return_value = {
+            "set_code": "M5", "name": "Abyss Eye",
+            "release_date": "22 MAY 2026", "total_cards": 118,
+        }
+        mock_build.return_value = Image.new("RGB", (10, 10))
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(io.StringIO()):
+                bc.main(["--set", "M5", "--paper", "a5", "--size", "900",
+                         "--out", os.path.join(tmp, "x.png")])
+        self.assertEqual(mock_build.call_args[0][0].size, 900)
 
 
 # ---------------------------------------------------------- build_cover --
@@ -694,11 +873,190 @@ class TestBuildCoverSmoke(unittest.TestCase):
         img = bc.build_cover(cfg)
         self.assertEqual(img.size, (600, 600))
 
+    def test_landscape_shows_qr_code_and_rarity_chart_side_by_side(self):
+        # Landscape's wider right column has room for both instead of picking
+        # one -- only kicks in when W > H (checked here via paper=a5-landscape).
+        cfg = self._base_cfg(paper="a5-landscape",
+                              qr_url="https://example.com/abyss-eye",
+                              rarity_counts=[("C", 38), ("U", 27), ("R", 8)])
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, round(600 * bc.A5_RATIO))
+        self.assertEqual(img.height, 600)
+
+    def test_a5_portrait_still_prioritizes_qr_over_rarity(self):
+        # Portrait A5 isn't any wider than square, so the combined layout
+        # shouldn't kick in there -- same priority as square.
+        cfg = self._base_cfg(paper="a5",
+                              qr_url="https://example.com/abyss-eye",
+                              rarity_counts=[("C", 38), ("U", 27)])
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, 600)
+        self.assertEqual(img.height, round(600 * bc.A5_RATIO))
+
     def test_renders_with_each_lang_flag(self):
         for lang in ("en", "jp", "cn", "kr"):
             with self.subTest(lang=lang):
                 img = bc.build_cover(self._base_cfg(lang_flag=lang))
                 self.assertEqual(img.size, (600, 600))
+
+    def test_renders_dual_set_cover(self):
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+        self.assertEqual(img.mode, "RGB")
+
+    def test_renders_dual_set_cover_with_japanese_names(self):
+        # Same environment-dependent CJK caveat as test_renders_with_japanese_name.
+        cfg = self._base_cfg(
+            name_jp="ムニキスゼロ",
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="ニンジャスピナー",
+            release_date2="13 MAR 2026", total_cards2="120",
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_ignores_single_set_only_blocks(self):
+        # era/--stat/QR/gauge/rarity-chart are single-set-only concerns -- passing
+        # them alongside set_code2 should be harmlessly ignored, not raise.
+        cfg = self._base_cfg(
+            era="Mega Series", qr_url="https://example.com/x", rarity_counts=[("C", 1)],
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_at_a_different_canvas_size(self):
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120", size=900,
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (900, 900))
+
+    def test_dual_set_cover_with_rarity_breakdown_in_both_columns(self):
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            rarity_counts=[("C", 38), ("U", 26), ("R", 8)],
+            rarity_counts2=[("C", 38), ("U", 29), ("R", 8), ("RR", 8), ("UR", 18)],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_with_rarity_breakdown_in_only_one_column(self):
+        # The second set's card-rarity fetch can fail independently of the first's,
+        # so each column's chart has to render fine on its own.
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            rarity_counts=[("C", 38), ("U", 26)],
+            rarity_counts2=[],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_with_qr_code_in_both_columns(self):
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            qr_url="https://example.com/m3", qr_url2="https://example.com/m4",
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_with_qr_code_in_one_column_and_rarity_in_the_other(self):
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            qr_url="https://example.com/m3",
+            rarity_counts2=[("C", 38), ("U", 29), ("R", 8)],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_qr_takes_priority_over_rarity_per_column(self):
+        # Same QR > rarity priority as the single-set cover, decided independently
+        # per column -- outside of landscape, a column never stacks both blocks
+        # (see test_dual_set_cover_landscape_stacks_qr_and_rarity_per_column).
+        cfg = self._base_cfg(
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            qr_url="https://example.com/m3", rarity_counts=[("C", 38)],
+            qr_url2="https://example.com/m4", rarity_counts2=[("C", 38)],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_dual_set_cover_landscape_stacks_qr_and_rarity_per_column(self):
+        # Landscape's wider columns have room to stack QR + rarity chart in the
+        # same column instead of picking one, independently per set.
+        cfg = self._base_cfg(
+            paper="a5-landscape",
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            qr_url="https://example.com/m3", rarity_counts=[("C", 38), ("U", 26)],
+            qr_url2="https://example.com/m4", rarity_counts2=[("C", 38), ("U", 29)],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, round(600 * bc.A5_RATIO))
+        self.assertEqual(img.height, 600)
+
+    def test_dual_set_cover_landscape_one_column_qr_other_rarity_only(self):
+        # A column with only a QR code (no rarity for that set) or only a rarity
+        # chart (no QR for that set) still renders fine in landscape.
+        cfg = self._base_cfg(
+            paper="a5-landscape",
+            set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+            qr_url="https://example.com/m3", rarity_counts=[],
+            qr_url2="", rarity_counts2=[("C", 38), ("U", 29)],
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, round(600 * bc.A5_RATIO))
+        self.assertEqual(img.height, 600)
+
+    def test_paper_a5_produces_a_taller_portrait_canvas(self):
+        cfg = self._base_cfg(paper="a5")
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, 600)
+        self.assertEqual(img.height, round(600 * bc.A5_RATIO))
+        self.assertGreater(img.height, img.width)
+
+    def test_paper_a5_landscape_produces_a_wider_canvas(self):
+        # Reuses the exact a5 portrait geometry internally and rotates the
+        # finished image 90 degrees, so width/height simply swap versus a5.
+        cfg = self._base_cfg(paper="a5-landscape")
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.width, round(600 * bc.A5_RATIO))
+        self.assertEqual(img.height, 600)
+        self.assertGreater(img.width, img.height)
+
+    def test_paper_square_stays_square_when_set_explicitly(self):
+        cfg = self._base_cfg(paper="square")
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, 600))
+
+    def test_paper_a5_with_two_stat_rows_does_not_overflow_the_panel(self):
+        # Regression check for the bug where fixed-size get_font(...) calls (not
+        # auto-scaled by fit_font's shrink-to-width) drifted out of sync with the
+        # W-scaled panel/margins at a canvas far from the 3600 default, pushing
+        # the second --stat row (and the footer) below the card entirely.
+        cfg = self._base_cfg(paper="a5", size=1748,
+                              stats=[("Main Set", 80), ("Secret Rares", 37)])
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (1748, round(1748 * bc.A5_RATIO)))
+
+    def test_paper_a5_dual_set_cover(self):
+        cfg = self._base_cfg(
+            paper="a5", set_code2="M4", name2="NINJA SPINNER", name_jp2="",
+            release_date2="13 MAR 2026", total_cards2="120",
+        )
+        img = bc.build_cover(cfg)
+        self.assertEqual(img.size, (600, round(600 * bc.A5_RATIO)))
 
 
 class TestMakeFlagBadge(unittest.TestCase):

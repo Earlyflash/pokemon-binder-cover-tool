@@ -17,6 +17,15 @@ Between them, the jobs below exercise every flag binder_cover.py has except
 --font-dir (covered instead by tests/test_binder_cover.py's font-resolution
 tests, since it needs a real alternate font file on disk to be meaningful).
 
+The DUAL_JOBS block afterward covers --set2 and everything that comes with
+it: the baseline side-by-side layout, --rarity-chart per column, --qr-url2
+(both columns showing a QR code), a mixed column (one QR, one rarity chart)
+to show the per-column QR > rarity priority, --paper a5 with a dual-set
+cover, and --paper a5-landscape stacking QR + rarity in the same column
+(the extra width the landscape layout has room for). All reuse m3/m4 (Nihil
+Zero/Ninja Spinner) since they're already the --set2 example set elsewhere
+in this repo (README, CLAUDE.md).
+
 Usage:
     python scripts/generate_samples.py                  # refreshes samples/ in place
     python scripts/generate_samples.py --output-dir DIR  # writes elsewhere instead (used by CI)
@@ -169,6 +178,61 @@ JOBS = [
     },
 ]
 
+# --set2 dual-set-cover jobs -- see the module docstring above. m3/m4 are
+# Japan-exclusive on TCGdex (no English release yet), so both the primary and
+# --set2 lookups need --name/--name-jp overrides, same as the m3/m4 entries in
+# JOBS above.
+_M3_M4_NAMES = ["--name", "Nihil Zero", "--name-jp", "ムニキスゼロ",
+                "--set2", "m4", "--name2", "Ninja Spinner", "--name-jp2", "ニンジャスピナー"]
+
+DUAL_JOBS = [
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES],
+        "out": "M3_M4_dual_cover.png",
+        "covers": "--set2/--name2/--name-jp2 baseline dual-set side-by-side layout",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES, "--rarity-chart"],
+        "out": "M3_M4_dual_rarity_cover.png",
+        "covers": "--rarity-chart rendered independently in each column",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES,
+                 "--qr-url", f"{RARECANDY}/nihil-zero?username=Earlyflash",
+                 "--qr-url2", f"{RARECANDY}/ninja-spinner?username=Earlyflash"],
+        "out": "M3_M4_dual_qr_cover.png",
+        "covers": "--qr-url2 -- both columns showing their own QR code",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES,
+                 "--qr-url", f"{RARECANDY}/nihil-zero?username=Earlyflash",
+                 "--rarity-chart"],
+        "out": "M3_M4_dual_qr_and_rarity_mixed_cover.png",
+        "covers": "per-column QR > rarity priority -- M3's column gets the QR code "
+                  "(--qr-url given, no --qr-url2), M4's falls back to its rarity chart",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES, "--paper", "a5"],
+        "out": "M3_M4_dual_a5_portrait_cover.png",
+        "covers": "--paper a5 with a dual-set cover",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES, "--paper", "a5-landscape",
+                 "--qr-url", f"{RARECANDY}/nihil-zero?username=Earlyflash",
+                 "--qr-url2", f"{RARECANDY}/ninja-spinner?username=Earlyflash",
+                 "--rarity-chart"],
+        "out": "M3_M4_dual_a5_landscape_qr_rarity_cover.png",
+        "covers": "--paper a5-landscape stacking QR code + rarity chart in the same "
+                  "column -- the extra width landscape has room for",
+    },
+]
+
 
 def run_job(job, out_dir):
     out_path = os.path.join(out_dir, job["out"])
@@ -215,8 +279,9 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    all_jobs = JOBS + DUAL_JOBS
     failures = []
-    for job in JOBS:
+    for job in all_jobs:
         if not run_job(job, args.output_dir):
             failures.append(job["out"])
     if not check_list_sets():
@@ -226,12 +291,12 @@ def main():
 
     print("\n" + "=" * 60)
     if failures:
-        print(f"FAILED: {len(failures)} of {len(JOBS) + 2} checks did not succeed:")
+        print(f"FAILED: {len(failures)} of {len(all_jobs) + 2} checks did not succeed:")
         for f in failures:
             print(f"  - {f}")
         return 1
 
-    print(f"OK: all {len(JOBS)} samples regenerated into {args.output_dir}, "
+    print(f"OK: all {len(all_jobs)} samples regenerated into {args.output_dir}, "
           "plus --list-sets and --size sanity checks passed.")
     return 0
 

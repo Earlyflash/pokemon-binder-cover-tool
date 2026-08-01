@@ -340,12 +340,34 @@ def hex_to_rgb(h):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
+A5_RATIO = 210 / 148  # ISO 216 A5 portrait, height/width
+
 def build_cover(cfg):
-    W = H = cfg.size
-    margin = int(W * 0.0833)          # 300 / 3600
-    radius = int(W * 0.0178)          # 64 / 3600
-    inset = int(W * 0.0094)           # 34 / 3600
-    pad = int(W * 0.055)              # inner content padding
+    # --size is the short edge: for --paper square it's also the height (the
+    # original design); for a5/a5-landscape the long edge is derived from the
+    # A5 ratio. All the decorative/vertical-rhythm fractions below are keyed off
+    # S = min(W, H) -- the short edge -- rather than W specifically, so the
+    # design always sizes itself to fit the *constrained* dimension and the
+    # extra length on the long edge becomes breathing room there (vertical for
+    # portrait, horizontal for landscape) instead of changing anything's
+    # absolute size. Actual horizontal geometry (content_x0/x1, cx, content_w,
+    # column widths, etc.) still uses the real W so text is fit/centered against
+    # the true available width, not S.
+    paper = getattr(cfg, "paper", "square")
+    if paper == "a5-landscape":
+        H = cfg.size
+        W = round(H * A5_RATIO)
+    elif paper == "a5":
+        W = cfg.size
+        H = round(W * A5_RATIO)
+    else:
+        W = H = cfg.size
+    S = min(W, H)
+    landscape = W > H
+    margin = int(S * 0.0833)          # 300 / 3600
+    radius = int(S * 0.0178)          # 64 / 3600
+    inset = int(S * 0.0094)           # 34 / 3600
+    pad = int(S * 0.055)              # inner content padding
 
     BG_COLOR = hex_to_rgb(cfg.bg_color)
     CARD_BG = (240, 233, 217)
@@ -361,71 +383,163 @@ def build_cover(cfg):
     cx = (px0 + px1) // 2
     content_w = content_x1 - content_x0
 
+    # fit_font calls below auto-scale with content_w/col_w already, since they
+    # shrink to fit whatever width is available -- but plain get_font(role,
+    # <literal px>) calls don't, so at any S far from the 3600 these literals
+    # were tuned at, the fixed-size text stops matching the S-scaled gaps around
+    # it (e.g. two --stat rows overlapping at a 1748px A5 short edge).
+    # FONT_SCALE keeps those literals in the same proportion to S they already
+    # have at the default 3600, and is exactly 1.0 there, so the default square
+    # output is untouched.
+    FONT_SCALE = S / 3600.0
+
+    def sz(n):
+        return max(1, round(n * FONT_SCALE))
+
+    # Dual-set mode is an entirely separate, more compact layout (opt-in via --set2)
+    # for binders that hold two short sets -- it intentionally skips the era line,
+    # --stat rows, and the QR/gauge/rarity-chart right column to keep vertical space
+    # down for A5 sticker printing. The single-set path below is untouched.
+    dual = bool(getattr(cfg, "set_code2", None))
+
     # ---- fonts (resolved once so dry-run + real-run stay identical) ----
     fd = cfg.font_dir
-    f_header = fit_font("bold_caps", cfg.game_title.upper(), 92, content_w, 34, fd, spacing=14)
-    f_era = None
-    if cfg.era:
-        f_era = fit_font("italic", cfg.era.upper(), 60, content_w, 26, fd, spacing=10)
-    f_setcode = fit_font("black_display", cfg.set_code.upper(), 610, content_w, 160, fd, spacing=0)
-    f_name = fit_font("black_display", cfg.name.upper(), 198, content_w, 60, fd, spacing=10)
-    f_jp, jp_ok = (None, False)
-    if cfg.name_jp:
-        _, jp_ok = get_font("japanese", 116, fd, verbose=cfg.verbose)
-        if jp_ok:
-            f_jp = fit_font("japanese", cfg.name_jp, 116, content_w, 40, fd)
-        else:
-            print("[warning] No Japanese-capable font found on this system -- the "
-                  "Japanese set name will be skipped. Install a CJK font (Windows/Mac "
-                  "already ship one; on Linux try 'fonts-noto-cjk') or pass --font-dir.")
-    lbl_font = get_font("medium", 50, fd)[0]
-    val_font = fit_font("bold_display", cfg.release_date.upper(), 102, content_w * 0.42, 40, fd)
-    val_font_cards = fit_font("bold_display", str(cfg.total_cards), 102, content_w * 0.42, 40, fd)
-    lbl2_font = get_font("medium", 47, fd)[0]
-    val2_font = get_font("bold_display", 87, fd)[0]
-    footer_font = get_font("bold_caps", 71, fd)[0]
-    qr_caption_font = get_font("bold_caps", 50, fd)[0]
-    qr_subcaption_font = get_font("medium", 34, fd)[0]
-    gauge_pct_font = get_font("black_display", 145, fd)[0]
-    gauge_caption_font = get_font("medium", 40, fd)[0]
-    rarity_caption_font = get_font("medium", 50, fd)[0]
 
-    stats = cfg.stats[:2]
+    if not dual:
+        f_header = fit_font("bold_caps", cfg.game_title.upper(), sz(92), content_w, sz(34), fd, spacing=14)
+        f_era = None
+        if cfg.era:
+            f_era = fit_font("italic", cfg.era.upper(), sz(60), content_w, sz(26), fd, spacing=10)
+        f_setcode = fit_font("black_display", cfg.set_code.upper(), sz(610), content_w, sz(160), fd, spacing=0)
+        f_name = fit_font("black_display", cfg.name.upper(), sz(198), content_w, sz(60), fd, spacing=10)
+        f_jp, jp_ok = (None, False)
+        if cfg.name_jp:
+            _, jp_ok = get_font("japanese", sz(116), fd, verbose=cfg.verbose)
+            if jp_ok:
+                f_jp = fit_font("japanese", cfg.name_jp, sz(116), content_w, sz(40), fd)
+            else:
+                print("[warning] No Japanese-capable font found on this system -- the "
+                      "Japanese set name will be skipped. Install a CJK font (Windows/Mac "
+                      "already ship one; on Linux try 'fonts-noto-cjk') or pass --font-dir.")
+        lbl_font = get_font("medium", sz(50), fd)[0]
+        val_font = fit_font("bold_display", cfg.release_date.upper(), sz(102), content_w * 0.42, sz(40), fd)
+        val_font_cards = fit_font("bold_display", str(cfg.total_cards), sz(102), content_w * 0.42, sz(40), fd)
+        lbl2_font = get_font("medium", sz(47), fd)[0]
+        val2_font = get_font("bold_display", sz(87), fd)[0]
+        footer_font = get_font("bold_caps", sz(71), fd)[0]
+        qr_caption_font = get_font("bold_caps", sz(50), fd)[0]
+        qr_subcaption_font = get_font("medium", sz(34), fd)[0]
+        gauge_pct_font = get_font("black_display", sz(145), fd)[0]
+        gauge_caption_font = get_font("medium", sz(40), fd)[0]
+        rarity_caption_font = get_font("medium", sz(50), fd)[0]
 
-    # completion parsing
-    completion = None
-    if cfg.qr_url and cfg.completion:
-        print("[note] Both --qr-url and --completion were given; showing the QR code "
-              "and ignoring --completion.")
-    if cfg.completion and not cfg.qr_url:
-        raw = cfg.completion.replace(" ", "")
-        if "/" in raw:
-            collected, total = raw.split("/", 1)
-            try:
-                pct = round(100 * float(collected) / float(total))
-            except (ValueError, ZeroDivisionError):
-                pct = 0
-            completion = {"collected": collected, "total": total, "pct": pct}
-        else:
-            try:
-                pct = round(float(raw.rstrip("%")))
-            except ValueError:
-                pct = 0
-            completion = {"collected": None, "total": None, "pct": pct}
+        stats = cfg.stats[:2]
 
-    qr_img = None
-    qr_size = int(W * 0.1194)  # 430/3600
-    if cfg.qr_url:
-        qr_img = make_qr_image(cfg.qr_url, qr_size, verbose=cfg.verbose)
+        # completion parsing
+        completion = None
+        if cfg.qr_url and cfg.completion:
+            print("[note] Both --qr-url and --completion were given; showing the QR code "
+                  "and ignoring --completion.")
+        if cfg.completion and not cfg.qr_url:
+            raw = cfg.completion.replace(" ", "")
+            if "/" in raw:
+                collected, total = raw.split("/", 1)
+                try:
+                    pct = round(100 * float(collected) / float(total))
+                except (ValueError, ZeroDivisionError):
+                    pct = 0
+                completion = {"collected": collected, "total": total, "pct": pct}
+            else:
+                try:
+                    pct = round(float(raw.rstrip("%")))
+                except ValueError:
+                    pct = 0
+                completion = {"collected": None, "total": None, "pct": pct}
 
-    # Rarity chart rows are sized to fit within the same total height as the QR code
-    # box, however many rarity tiers there are -- so it never pushes the rule below
-    # it further down than a QR code or completion gauge would.
-    rarity_chart_h = qr_size + 2 * int(qr_size * 0.047)
-    num_rarity_rows = len(cfg.rarity_counts)
-    rarity_row_h = rarity_chart_h / num_rarity_rows if num_rarity_rows else rarity_chart_h
-    rarity_label_font = get_font("bold_caps", int(min(38, max(16, rarity_row_h * 0.5))), fd)[0]
-    rarity_count_font = get_font("medium", int(min(34, max(14, rarity_row_h * 0.45))), fd)[0]
+        # Landscape has enough width in the right column to show the QR code and
+        # rarity chart side by side instead of picking one -- the QR module just
+        # needs to be a bit smaller to leave room for the chart next to it.
+        wants_qr_and_rarity = landscape and bool(cfg.qr_url) and bool(cfg.rarity_counts)
+        qr_img = None
+        qr_size = int(S * 0.1194)  # 430/3600
+        qr_size_split = int(S * 0.08)
+        if cfg.qr_url:
+            qr_img = make_qr_image(cfg.qr_url, qr_size_split if wants_qr_and_rarity else qr_size,
+                                    verbose=cfg.verbose)
+
+        # Rarity chart rows are sized to fit within the same total height as the QR code
+        # box, however many rarity tiers there are -- so it never pushes the rule below
+        # it further down than a QR code or completion gauge would.
+        rarity_chart_h = qr_size + 2 * int(qr_size * 0.047)
+        num_rarity_rows = len(cfg.rarity_counts)
+        rarity_row_h = rarity_chart_h / num_rarity_rows if num_rarity_rows else rarity_chart_h
+        rarity_label_font = get_font("bold_caps", int(min(38, max(16, rarity_row_h * 0.5))), fd)[0]
+        rarity_count_font = get_font("medium", int(min(34, max(14, rarity_row_h * 0.45))), fd)[0]
+    else:
+        f_header = fit_font("bold_caps", cfg.game_title.upper(), sz(92), content_w, sz(34), fd, spacing=14)
+        footer_font = get_font("bold_caps", sz(71), fd)[0]
+
+        # Two content columns side by side, with a gap for the center divider rule.
+        col_gap = int(S * 0.03)
+        col1_x0, col1_x1 = content_x0, cx - col_gap // 2
+        col2_x0, col2_x1 = cx + col_gap // 2, content_x1
+        col1_cx = (col1_x0 + col1_x1) // 2
+        col2_cx = (col2_x0 + col2_x1) // 2
+        col_w = col1_x1 - col1_x0
+
+        f_code1 = fit_font("black_display", cfg.set_code.upper(), sz(300), col_w, sz(90), fd, spacing=0)
+        f_code2 = fit_font("black_display", cfg.set_code2.upper(), sz(300), col_w, sz(90), fd, spacing=0)
+        f_setname1 = fit_font("black_display", cfg.name.upper(), sz(108), col_w, sz(32), fd, spacing=6)
+        f_setname2 = fit_font("black_display", cfg.name2.upper(), sz(108), col_w, sz(32), fd, spacing=6)
+
+        name_jp2 = getattr(cfg, "name_jp2", "")
+        f_jp1 = f_jp2 = None
+        if cfg.name_jp or name_jp2:
+            _, jp_ok = get_font("japanese", sz(60), fd, verbose=cfg.verbose)
+            if jp_ok:
+                if cfg.name_jp:
+                    f_jp1 = fit_font("japanese", cfg.name_jp, sz(60), col_w, sz(22), fd)
+                if name_jp2:
+                    f_jp2 = fit_font("japanese", name_jp2, sz(60), col_w, sz(22), fd)
+            else:
+                print("[warning] No Japanese-capable font found on this system -- the "
+                      "Japanese set name(s) will be skipped. Install a CJK font (Windows/Mac "
+                      "already ship one; on Linux try 'fonts-noto-cjk') or pass --font-dir.")
+
+        mini_font1 = fit_font("medium", f"{cfg.release_date.upper()} · {cfg.total_cards} CARDS",
+                               sz(42), col_w, sz(20), fd, spacing=2)
+        mini_font2 = fit_font("medium", f"{cfg.release_date2.upper()} · {cfg.total_cards2} CARDS",
+                               sz(42), col_w, sz(20), fd, spacing=2)
+
+        # ---- optional per-column QR code / rarity breakdown ----
+        # Decided independently per column. In the square/portrait cards there's
+        # only room for one, so QR takes priority over the rarity chart same as
+        # the single-set cover -- but landscape's much wider columns have room to
+        # stack both (QR on top, rarity chart below) when a column has both.
+        qr_url2 = getattr(cfg, "qr_url2", "") or ""
+        rarity_counts1 = cfg.rarity_counts or []
+        rarity_counts2 = getattr(cfg, "rarity_counts2", None) or []
+
+        qr_size_dual = int(col_w * 0.5)
+        qr_size_dual_both = int(qr_size_dual * 0.68)
+
+        wants_both1 = landscape and bool(cfg.qr_url) and bool(rarity_counts1)
+        qr_img1 = make_qr_image(cfg.qr_url, qr_size_dual_both if wants_both1 else qr_size_dual,
+                                 verbose=cfg.verbose) if cfg.qr_url else None
+        kind1 = ("both" if (qr_img1 and rarity_counts1 and landscape) else
+                 ("qr" if qr_img1 else ("rarity" if rarity_counts1 else None)))
+
+        wants_both2 = landscape and bool(qr_url2) and bool(rarity_counts2)
+        qr_img2 = make_qr_image(qr_url2, qr_size_dual_both if wants_both2 else qr_size_dual,
+                                 verbose=cfg.verbose) if qr_url2 else None
+        kind2 = ("both" if (qr_img2 and rarity_counts2 and landscape) else
+                 ("qr" if qr_img2 else ("rarity" if rarity_counts2 else None)))
+
+        extra_caption_font_dual = get_font("bold_caps", sz(26), fd)[0]
+        extra_subcaption_font_dual = get_font("medium", sz(22), fd)[0]
+        rarity_row_h_dual = int(S * 0.024)
+        rarity_label_font_dual = get_font("bold_caps", int(min(26, max(11, rarity_row_h_dual * 0.5))), fd)[0]
+        rarity_count_font_dual = get_font("medium", int(min(22, max(10, rarity_row_h_dual * 0.45))), fd)[0]
 
     # ---------------------------------------------------------- background --
     img = Image.new("RGB", (W, H), BG_COLOR)
@@ -434,9 +548,9 @@ def build_cover(cfg):
     # drop shadow + panel
     shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
-    off = int(W * 0.0139)
+    off = int(S * 0.0139)
     sd.rounded_rectangle([px0, py0 + off, px1, py1 + off], radius=radius, fill=(0, 0, 0, 160))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(int(W * 0.0167)))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(int(S * 0.0167)))
     img = Image.alpha_composite(img.convert("RGBA"), shadow).convert("RGB")
     draw = ImageDraw.Draw(img)
 
@@ -446,16 +560,16 @@ def build_cover(cfg):
                             radius=max(1, radius - 24), outline=(180, 171, 150), width=3)
 
     if cfg.accent_tab:
-        tab_w = int(W * 0.0056)
-        tab_y0 = py0 + int(H * 0.0833)
-        tab_y1 = py0 + int(H * 0.2111)
+        tab_w = int(S * 0.0056)
+        tab_y0 = py0 + int(S * 0.0833)
+        tab_y1 = py0 + int(S * 0.2111)
         draw.rectangle([px1 - inset - tab_w, tab_y0, px1 - inset, tab_y1], fill=RED)
 
     if cfg.lang_flag:
-        badge_w = int(W * 0.06)
+        badge_w = int(S * 0.06)
         badge_h = int(badge_w * 0.66)
-        badge_x0 = px0 + inset + int(W * 0.018)
-        badge_y0 = py0 + inset + int(H * 0.018)
+        badge_x0 = px0 + inset + int(S * 0.018)
+        badge_y0 = py0 + inset + int(S * 0.018)
         badge = make_flag_badge(badge_w, badge_h, cfg.lang_flag)
         img.paste(badge, (badge_x0, badge_y0))
         draw.rectangle([badge_x0, badge_y0, badge_x0 + badge_w, badge_y0 + badge_h],
@@ -464,6 +578,152 @@ def build_cover(cfg):
     # ------------------------------------------------------- layout blocks --
     # Two-pass: pass 1 (render=False) only measures the total content height so
     # we can center everything vertically inside the panel; pass 2 draws it.
+
+    def draw_footer(y, render):
+        if not cfg.footer:
+            return y
+        label_text = cfg.footer.upper()
+        f_footer = fit_font("bold_caps", label_text, footer_font.size, content_w * 0.82, sz(30), fd, spacing=12)
+        lbl_w = measure_spaced(f_footer, label_text, 12)
+        ball_r = int(S * 0.0125)
+        gap = int(S * 0.0111)
+        total_w = ball_r * 2 + gap + lbl_w
+        start_x = cx - total_w / 2
+        ball_cx = start_x + ball_r
+        ball_cy = y + f_footer.size * 0.5
+        if render:
+            pokeball(draw, int(ball_cx), int(ball_cy), ball_r, INK, RED, CARD_BG)
+            draw_spaced(draw, start_x + ball_r * 2 + gap + lbl_w / 2, y, label_text, f_footer, INK, 12)
+        return y + int(f_footer.size * 1.3)
+
+    def run_dual(y0, render):
+        y = y0
+
+        if render:
+            draw_spaced(draw, cx, y, cfg.game_title.upper(), f_header, INK, 14)
+        y += int(f_header.size * 1.43)
+
+        if render:
+            draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
+        y += int(S * 0.036)
+
+        divider_top = y
+
+        code_top = y
+        if render:
+            centered(draw, col1_cx, code_top + int(f_code1.size * 0.40), cfg.set_code.upper(), f_code1, INK)
+            centered(draw, col2_cx, code_top + int(f_code2.size * 0.40), cfg.set_code2.upper(), f_code2, INK)
+        y = code_top + int(max(f_code1.size, f_code2.size) * 0.92)
+
+        name_top = y
+        if render:
+            draw_spaced(draw, col1_cx, name_top, cfg.name.upper(), f_setname1, RED, 6)
+            draw_spaced(draw, col2_cx, name_top, cfg.name2.upper(), f_setname2, RED, 6)
+        y = name_top + int(max(f_setname1.size, f_setname2.size) * 1.24)
+
+        if f_jp1 or f_jp2:
+            jp_top = y
+            jp_sizes = [f.size for f in (f_jp1, f_jp2) if f]
+            if render:
+                if f_jp1:
+                    centered(draw, col1_cx, jp_top + int(f_jp1.size * 0.40), cfg.name_jp, f_jp1, (90, 84, 74))
+                if f_jp2:
+                    centered(draw, col2_cx, jp_top + int(f_jp2.size * 0.40), name_jp2, f_jp2, (90, 84, 74))
+            y = jp_top + int(max(jp_sizes) * 1.28)
+
+        mini_top = y + int(S * 0.014)
+        if render:
+            draw_spaced(draw, col1_cx, mini_top, f"{cfg.release_date.upper()} · {cfg.total_cards} CARDS",
+                        mini_font1, GRAY, 2)
+            draw_spaced(draw, col2_cx, mini_top, f"{cfg.release_date2.upper()} · {cfg.total_cards2} CARDS",
+                        mini_font2, GRAY, 2)
+        y = mini_top + int(max(mini_font1.size, mini_font2.size) * 1.3)
+
+        def draw_qr_col(col_x0, col_x1, col_cx, qr_img, qr_caption, qr_subcaption, top_y):
+            size = qr_img.width
+            caption_text = qr_caption.upper()
+            f_cap = fit_font("bold_caps", caption_text, extra_caption_font_dual.size,
+                              col_x1 - col_x0, sz(16), fd, spacing=4)
+            if render:
+                draw_spaced(draw, col_cx, top_y, caption_text, f_cap, INK, 4)
+            box_top = top_y + int(f_cap.size * 2.0)
+            qr_pad = int(size * 0.05)
+            box_half = size / 2 + qr_pad
+            if render:
+                box = [col_cx - box_half, box_top, col_cx + box_half, box_top + size + 2 * qr_pad]
+                draw.rounded_rectangle(box, radius=14, fill=(255, 255, 255), outline=CARD_BORDER, width=3)
+                img.paste(qr_img, (int(col_cx - size / 2), int(box_top + qr_pad)))
+            bottom = box_top + size + 2 * qr_pad
+            if qr_subcaption:
+                sub_text = qr_subcaption.upper()
+                f_sub = fit_font("medium", sub_text, extra_subcaption_font_dual.size,
+                                  col_x1 - col_x0, sz(12), fd, spacing=3)
+                sub_y = bottom + int(S * 0.006)
+                if render:
+                    draw_spaced(draw, col_cx, sub_y, sub_text, f_sub, GRAY, 3)
+                bottom = sub_y + int(f_sub.size * 1.3)
+            return bottom
+
+        def draw_rarity_col(col_x0, col_x1, col_cx, counts, top_y):
+            if render:
+                draw_spaced(draw, col_cx, top_y, "RARITY BREAKDOWN", extra_caption_font_dual, GRAY, 4)
+            rows_top = top_y + int(extra_caption_font_dual.size * 2.0)
+            if render:
+                block_half_w = (col_x1 - col_x0) / 2
+                max_label_w = max((text_w(rarity_label_font_dual, label) for label, _ in counts), default=0)
+                count_col_w = int(S * 0.02)
+                gap = int(S * 0.008)
+                label_x1 = col_cx - block_half_w + max_label_w
+                bar_x0 = label_x1 + gap
+                bar_x1 = col_cx + block_half_w - count_col_w - gap
+                count_x0 = bar_x1 + gap
+                bar_max_w = max(1, bar_x1 - bar_x0)
+                bar_h = max(2, int(rarity_row_h_dual * 0.4))
+                max_count = max(c for _, c in counts)
+                row_y = rows_top
+                for label, count in counts:
+                    draw.text((label_x1, row_y), label, font=rarity_label_font_dual, fill=INK, anchor="ra")
+                    bar_w = max(4, int(bar_max_w * count / max_count))
+                    bar_top = row_y + (rarity_row_h_dual - bar_h) / 2
+                    draw.rounded_rectangle([bar_x0, bar_top, bar_x0 + bar_w, bar_top + bar_h],
+                                            radius=bar_h // 2, fill=RED)
+                    draw.text((count_x0, row_y), str(count), font=rarity_count_font_dual, fill=GRAY, anchor="la")
+                    row_y += rarity_row_h_dual
+            return rows_top + len(counts) * rarity_row_h_dual
+
+        def draw_extra_col(kind, col_x0, col_x1, col_cx, qr_img, qr_caption, qr_subcaption, counts, top_y):
+            if kind is None:
+                return top_y
+            if kind == "qr":
+                return draw_qr_col(col_x0, col_x1, col_cx, qr_img, qr_caption, qr_subcaption, top_y)
+            if kind == "rarity":
+                return draw_rarity_col(col_x0, col_x1, col_cx, counts, top_y)
+            # kind == "both" -- QR on top, rarity chart stacked below it, since
+            # landscape's columns are wide enough for both but not side by side
+            # within one already-narrow column.
+            qr_bottom = draw_qr_col(col_x0, col_x1, col_cx, qr_img, qr_caption, qr_subcaption, top_y)
+            rarity_top = qr_bottom + int(S * 0.02)
+            return draw_rarity_col(col_x0, col_x1, col_cx, counts, rarity_top)
+
+        if kind1 or kind2:
+            extra_top = y + int(S * 0.018)
+            bottom1 = draw_extra_col(kind1, col1_x0, col1_x1, col1_cx, qr_img1,
+                                      cfg.qr_caption, cfg.qr_subcaption, rarity_counts1, extra_top)
+            bottom2 = draw_extra_col(kind2, col2_x0, col2_x1, col2_cx, qr_img2,
+                                      getattr(cfg, "qr_caption2", "Scan To Track") or "Scan To Track",
+                                      getattr(cfg, "qr_subcaption2", "") or "", rarity_counts2, extra_top)
+            y = max(bottom1, bottom2) + int(S * 0.01)
+
+        if render:
+            draw.line([(cx, divider_top - int(S * 0.01)), (cx, y)], fill=LIGHT_RULE, width=3)
+        y += int(S * 0.018)
+
+        if render:
+            draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
+        y += int(S * 0.026)
+
+        y = draw_footer(y, render)
+        return y
 
     def run(y0, render):
         y = y0
@@ -479,7 +739,7 @@ def build_cover(cfg):
 
         if render:
             draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
-        y += int(W * 0.036)
+        y += int(S * 0.036)
 
         if render:
             centered(draw, cx, y + int(f_setcode.size * 0.40), cfg.set_code.upper(), f_setcode, INK)
@@ -496,7 +756,7 @@ def build_cover(cfg):
 
         if render:
             draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
-        y += int(W * 0.029)
+        y += int(S * 0.029)
 
         grid_top = y
         row1_val_y = grid_top + int(lbl_font.size * 2.36)
@@ -515,103 +775,83 @@ def build_cover(cfg):
             draw.line([(cx, grid_top - 10), (cx, row1_bottom)], fill=LIGHT_RULE, width=3)
             draw.line([(content_x0, row1_bottom), (content_x1, row1_bottom)], fill=LIGHT_RULE, width=3)
 
-        y = row1_bottom + int(W * 0.0256)
+        y = row1_bottom + int(S * 0.0256)
         row2_top = y
 
         # ---- left column: up to 2 stats ----
         # Label/value text is fully user-controlled (--stat), so it's fit to the
         # available column width just like every other headline text -- lbl2_font/
         # val2_font stay the sizing basis for vertical rhythm either way.
-        stat_max_w = cx - content_x0 - int(W * 0.02)
+        stat_max_w = cx - content_x0 - int(S * 0.02)
         left_bottom = row2_top
         if len(stats) == 1:
             label, value = stats[0]
-            mid = row2_top + int(W * 0.075)
-            f_lbl = fit_font("medium", label.upper(), lbl2_font.size, stat_max_w, 20, fd)
-            f_val = fit_font("bold_display", str(value), val2_font.size, stat_max_w, 30, fd)
+            mid = row2_top + int(S * 0.075)
+            f_lbl = fit_font("medium", label.upper(), lbl2_font.size, stat_max_w, sz(20), fd)
+            f_val = fit_font("bold_display", str(value), val2_font.size, stat_max_w, sz(30), fd)
             if render:
                 draw.text((content_x0, mid - lbl2_font.size - 10), label.upper(), font=f_lbl, fill=GRAY, anchor="la")
                 draw.text((content_x0, mid), str(value), font=f_val, fill=INK, anchor="la")
             left_bottom = mid + int(val2_font.size * 1.3)
         elif len(stats) == 2:
             (l1, v1), (l2, v2) = stats
-            f_lbl1 = fit_font("medium", l1.upper(), lbl2_font.size, stat_max_w, 20, fd)
-            f_val1 = fit_font("bold_display", str(v1), val2_font.size, stat_max_w, 30, fd)
-            f_lbl2 = fit_font("medium", l2.upper(), lbl2_font.size, stat_max_w, 20, fd)
-            f_val2 = fit_font("bold_display", str(v2), val2_font.size, stat_max_w, 30, fd)
+            f_lbl1 = fit_font("medium", l1.upper(), lbl2_font.size, stat_max_w, sz(20), fd)
+            f_val1 = fit_font("bold_display", str(v1), val2_font.size, stat_max_w, sz(30), fd)
+            f_lbl2 = fit_font("medium", l2.upper(), lbl2_font.size, stat_max_w, sz(20), fd)
+            f_val2 = fit_font("bold_display", str(v2), val2_font.size, stat_max_w, sz(30), fd)
             if render:
                 draw.text((content_x0, row2_top), l1.upper(), font=f_lbl1, fill=GRAY, anchor="la")
                 draw.text((content_x0, row2_top + int(lbl2_font.size * 1.96)), str(v1), font=f_val1, fill=INK, anchor="la")
-                second_y = row2_top + int(W * 0.0806)
+                second_y = row2_top + int(S * 0.0806)
                 draw.text((content_x0, second_y), l2.upper(), font=f_lbl2, fill=GRAY, anchor="la")
                 draw.text((content_x0, second_y + int(lbl2_font.size * 1.96)), str(v2), font=f_val2, fill=INK, anchor="la")
-            left_bottom = row2_top + int(W * 0.0806) + int(lbl2_font.size * 1.96) + int(val2_font.size * 1.3)
+            left_bottom = row2_top + int(S * 0.0806) + int(lbl2_font.size * 1.96) + int(val2_font.size * 1.3)
 
-        # ---- right column: QR / gauge / blank ----
+        # ---- right column: QR / gauge / rarity chart / blank ----
         gcx = cx + (content_x1 - cx) * 0.62
         right_bottom = row2_top
-
         qr_col_max_w = content_x1 - cx
-        if qr_img is not None:
+
+        def draw_qr(gcx_, max_w_, top_):
+            size = qr_img.width
             qr_caption_text = cfg.qr_caption.upper()
             f_qr_caption = fit_font("bold_caps", qr_caption_text, qr_caption_font.size,
-                                     qr_col_max_w, 26, fd, spacing=6)
+                                     max_w_, sz(26), fd, spacing=6)
             if render:
-                draw_spaced(draw, gcx, row2_top, qr_caption_text, f_qr_caption, INK, 6)
-            box_top = row2_top + int(qr_caption_font.size * 2.1)
-            qr_pad = int(qr_size * 0.047)
-            box_half = qr_size / 2 + qr_pad
+                draw_spaced(draw, gcx_, top_, qr_caption_text, f_qr_caption, INK, 6)
+            box_top = top_ + int(qr_caption_font.size * 2.1)
+            qr_pad = int(size * 0.047)
+            box_half = size / 2 + qr_pad
             if render:
-                box = [gcx - box_half, box_top, gcx + box_half, box_top + qr_size + 2 * qr_pad]
+                box = [gcx_ - box_half, box_top, gcx_ + box_half, box_top + size + 2 * qr_pad]
                 draw.rounded_rectangle(box, radius=20, fill=(255, 255, 255), outline=CARD_BORDER, width=5)
-                img.paste(qr_img, (int(gcx - qr_size / 2), int(box_top + qr_pad)))
-            right_bottom = box_top + qr_size + 2 * qr_pad
+                img.paste(qr_img, (int(gcx_ - size / 2), int(box_top + qr_pad)))
+            bottom = box_top + size + 2 * qr_pad
             if cfg.qr_subcaption:
                 qr_subcaption_text = cfg.qr_subcaption.upper()
                 f_qr_subcaption = fit_font("medium", qr_subcaption_text, qr_subcaption_font.size,
-                                            qr_col_max_w, 18, fd, spacing=6)
-                sub_y = right_bottom + int(W * 0.0111)
+                                            max_w_, sz(18), fd, spacing=6)
+                sub_y = bottom + int(S * 0.0111)
                 if render:
-                    draw_spaced(draw, gcx, sub_y, qr_subcaption_text, f_qr_subcaption, GRAY, 6)
-                right_bottom = sub_y + int(qr_subcaption_font.size * 1.3)
+                    draw_spaced(draw, gcx_, sub_y, qr_subcaption_text, f_qr_subcaption, GRAY, 6)
+                bottom = sub_y + int(qr_subcaption_font.size * 1.3)
+            return bottom
 
-        elif completion is not None:
-            gauge_r = int(W * 0.0697)
-            gcy = row2_top + gauge_r + int(W * 0.011)
-            bbox = [gcx - gauge_r, gcy - gauge_r, gcx + gauge_r, gcy + gauge_r]
-            thickness = int(gauge_r * 0.18)
-            pct = max(0, min(100, completion["pct"]))
+        def draw_rarity(gcx_, block_half_w_, top_):
             if render:
-                draw.arc(bbox, 0, 360, fill=(222, 213, 193), width=thickness)
-                draw.arc(bbox, -90, -90 + 360 * (pct / 100.0), fill=RED, width=thickness)
-                centered(draw, gcx, gcy - gauge_pct_font.size * 0.28, f"{pct}%", gauge_pct_font, INK)
-                draw_spaced(draw, gcx, gcy + gauge_pct_font.size * 0.5, "COMPLETE", gauge_caption_font, GRAY, 6)
-            right_bottom = gcy + gauge_r
-            if completion["collected"] is not None:
-                cap_y = right_bottom + int(W * 0.02)
-                if render:
-                    centered(draw, gcx, cap_y, f"{completion['collected']} / {completion['total']}", val2_font, INK)
-                right_bottom = cap_y + int(val2_font.size * 0.8)
-
-        elif cfg.rarity_counts:
+                draw_spaced(draw, gcx_, top_, "RARITY BREAKDOWN", rarity_caption_font, GRAY, 5)
+            rows_top = top_ + int(rarity_caption_font.size * 2.1)
             if render:
-                draw_spaced(draw, gcx, row2_top, "RARITY BREAKDOWN", rarity_caption_font, GRAY, 5)
-            rows_top = row2_top + int(rarity_caption_font.size * 2.1)
-
-            block_half_w = int(W * 0.165)
-            max_label_w = max(text_w(rarity_label_font, label) for label, _ in cfg.rarity_counts)
-            count_col_w = int(W * 0.035)
-            gap = int(W * 0.012)
-            label_x1 = gcx - block_half_w + max_label_w
-            bar_x0 = label_x1 + gap
-            bar_x1 = gcx + block_half_w - count_col_w - gap
-            count_x0 = bar_x1 + gap
-            bar_max_w = max(1, bar_x1 - bar_x0)
-
-            bar_h = max(3, int(rarity_row_h * 0.4))
-            max_count = max(c for _, c in cfg.rarity_counts)
-
-            if render:
+                max_label_w = max(text_w(rarity_label_font, label) for label, _ in cfg.rarity_counts)
+                count_col_w = int(S * 0.035)
+                gap = int(S * 0.012)
+                label_x1 = gcx_ - block_half_w_ + max_label_w
+                bar_x0 = label_x1 + gap
+                bar_x1 = gcx_ + block_half_w_ - count_col_w - gap
+                count_x0 = bar_x1 + gap
+                bar_max_w = max(1, bar_x1 - bar_x0)
+                bar_h = max(3, int(rarity_row_h * 0.4))
+                max_count = max(c for _, c in cfg.rarity_counts)
                 row_y = rows_top
                 for label, count in cfg.rarity_counts:
                     draw.text((label_x1, row_y), label, font=rarity_label_font, fill=INK, anchor="ra")
@@ -624,35 +864,58 @@ def build_cover(cfg):
                     row_y += rarity_row_h
             # Fixed regardless of row count, so this block is always exactly as tall
             # as the QR code box -- see rarity_chart_h above.
-            right_bottom = rows_top + rarity_chart_h
+            return rows_top + rarity_chart_h
 
-        y = max(left_bottom, right_bottom) + int(W * 0.0125)
+        if qr_img is not None and cfg.rarity_counts and landscape:
+            # Landscape's right area is wide enough to show the QR code and the
+            # rarity chart side by side instead of one replacing the other.
+            right_x0, right_x1 = cx, content_x1
+            half_w = (right_x1 - right_x0) / 2
+            qr_gcx = right_x0 + half_w * 0.5
+            rarity_gcx = right_x0 + half_w * 1.5
+            qr_bottom = draw_qr(qr_gcx, half_w * 0.86, row2_top)
+            rarity_bottom = draw_rarity(rarity_gcx, half_w * 0.42, row2_top)
+            right_bottom = max(qr_bottom, rarity_bottom)
+
+        elif qr_img is not None:
+            right_bottom = draw_qr(gcx, qr_col_max_w, row2_top)
+
+        elif completion is not None:
+            gauge_r = int(S * 0.0697)
+            gcy = row2_top + gauge_r + int(S * 0.011)
+            bbox = [gcx - gauge_r, gcy - gauge_r, gcx + gauge_r, gcy + gauge_r]
+            thickness = int(gauge_r * 0.18)
+            pct = max(0, min(100, completion["pct"]))
+            if render:
+                draw.arc(bbox, 0, 360, fill=(222, 213, 193), width=thickness)
+                draw.arc(bbox, -90, -90 + 360 * (pct / 100.0), fill=RED, width=thickness)
+                centered(draw, gcx, gcy - gauge_pct_font.size * 0.28, f"{pct}%", gauge_pct_font, INK)
+                draw_spaced(draw, gcx, gcy + gauge_pct_font.size * 0.5, "COMPLETE", gauge_caption_font, GRAY, 6)
+            right_bottom = gcy + gauge_r
+            if completion["collected"] is not None:
+                cap_y = right_bottom + int(S * 0.02)
+                if render:
+                    centered(draw, gcx, cap_y, f"{completion['collected']} / {completion['total']}", val2_font, INK)
+                right_bottom = cap_y + int(val2_font.size * 0.8)
+
+        elif cfg.rarity_counts:
+            right_bottom = draw_rarity(gcx, int(S * 0.165), row2_top)
+
+        y = max(left_bottom, right_bottom) + int(S * 0.0125)
         if render:
             draw.line([(content_x0, y), (content_x1, y)], fill=LIGHT_RULE, width=3)
-        y += int(W * 0.026)
+        y += int(S * 0.026)
 
         # ---- footer ----
-        if cfg.footer:
-            label_text = cfg.footer.upper()
-            f_footer = fit_font("bold_caps", label_text, footer_font.size, content_w * 0.82, 30, fd, spacing=12)
-            lbl_w = measure_spaced(f_footer, label_text, 12)
-            ball_r = int(W * 0.0125)
-            gap = int(W * 0.0111)
-            total_w = ball_r * 2 + gap + lbl_w
-            start_x = cx - total_w / 2
-            ball_cx = start_x + ball_r
-            ball_cy = y + f_footer.size * 0.5
-            if render:
-                pokeball(draw, int(ball_cx), int(ball_cy), ball_r, INK, RED, CARD_BG)
-                draw_spaced(draw, start_x + ball_r * 2 + gap + lbl_w / 2, y, label_text, f_footer, INK, 12)
-            y += int(f_footer.size * 1.3)
+        y = draw_footer(y, render)
 
         return y
 
+    layout_fn = run_dual if dual else run
     panel_h = py1 - py0
-    total_h = run(0, render=False)
-    start_y = py0 + max(int(H * 0.02), (panel_h - total_h) // 2)
-    run(start_y, render=True)
+    total_h = layout_fn(0, render=False)
+    start_y = py0 + max(int(S * 0.02), (panel_h - total_h) // 2)
+    layout_fn(start_y, render=True)
 
     return img
 
@@ -1002,6 +1265,24 @@ def build_arg_parser():
                                                  'e.g. "Mega Series" or "Scarlet & Violet Era"')
     p.add_argument("--release-date", default=None, help='Override the looked-up release date, e.g. "22 MAY 2026"')
     p.add_argument("--total-cards", default=None, help="Override the looked-up total card count")
+
+    p.add_argument("--set2", dest="set_query2", default=None,
+                    help="Optional second set (code or name) for a dual-set binder cover -- e.g. "
+                         "two short sets sharing one folder. Switches to a compact side-by-side "
+                         "layout instead of the normal single-set one; the single-set cover is "
+                         "completely unchanged if this is omitted. The --*2 overrides below only "
+                         "take effect together with --set2.")
+    p.add_argument("--set-code2", default=None, help="Override the looked-up set code for --set2")
+    p.add_argument("--name2", default=None, help="Override the looked-up English set name for --set2")
+    p.add_argument("--name-jp2", default=None, help="Override the looked-up Japanese set name for --set2")
+    p.add_argument("--release-date2", default=None, help="Override the looked-up release date for --set2")
+    p.add_argument("--total-cards2", default=None, help="Override the looked-up total card count for --set2")
+    p.add_argument("--qr-url2", default="", help="If set, shows a QR code for --set2 in its own column. "
+                                                    "Takes priority over that column's rarity chart, same as "
+                                                    "--qr-url does for the primary set.")
+    p.add_argument("--qr-caption2", default="Scan To Track")
+    p.add_argument("--qr-subcaption2", default="")
+
     p.add_argument("--stat", nargs=2, action="append", default=[], metavar=("LABEL", "VALUE"),
                     help="Up to two stat rows, e.g. --stat \"Secret Rares\" 37 (repeatable, max 2) -- "
                          "overrides the looked-up Main Set / Secret Rares rows if you pass this yourself")
@@ -1029,7 +1310,18 @@ def build_arg_parser():
                     help="Show a small language flag badge in the top-left corner: en (English), "
                          "jp (Japanese), cn (Chinese), or kr (Korean). Off by default; purely a "
                          "cosmetic label you choose yourself, independent of --name/--name-jp.")
-    p.add_argument("--size", type=int, default=3600, help="Canvas size in pixels (square). Default 3600 (=12in @300dpi).")
+    p.add_argument("--paper", choices=["square", "a5", "a5-landscape"], default="square",
+                    help="square (default): current behavior, a square canvas --size pixels on each "
+                         "side. a5: an A5 portrait sheet (148x210mm) so the cover prints straight onto "
+                         "an A5 sticker -- --size is the short (148mm) edge and the long edge is "
+                         "derived from the A5 ratio, with the panel's content centered inside the "
+                         "extra length rather than stretched. a5-landscape: the same A5 sheet turned "
+                         "sideways (210x148mm, text stays upright) -- --size is still the short "
+                         "(148mm) edge, now the height.")
+    p.add_argument("--size", type=int, default=None,
+                    help="Pixel length of the short edge. Default 3600 (=12in @300dpi) for --paper "
+                         "square (where it's also the only edge), or 1748 (=148mm @300dpi) for "
+                         "--paper a5/a5-landscape.")
     p.add_argument("--font-dir", default=None, help="Extra directory to search for fonts first")
     p.add_argument("-o", "--out", default=None,
                     help="Output PNG path (default: <SET_CODE>_<name>_<EN|JP>_cover.png -- "
@@ -1057,6 +1349,9 @@ def main(argv=None):
         parser.error("--set is required (or use --list-sets to browse available sets)")
 
     args.stats = [tuple(s) for s in args.stat]
+
+    if args.size is None:
+        args.size = 1748 if args.paper in ("a5", "a5-landscape") else 3600
 
     had_name = args.name is not None
     looked_up = lookup_set_info(args.set_query, verbose=args.verbose)
@@ -1099,13 +1394,49 @@ def main(argv=None):
             args.rarity_counts = fetch_rarity_counts(
                 cards, looked_up["_cards_lang"], verbose=args.verbose)
 
+    if args.set_query2:
+        had_name2 = args.name2 is not None
+        looked_up2 = lookup_set_info(args.set_query2, verbose=args.verbose)
+        for field in ("set_code", "name", "name_jp", "release_date", "total_cards"):
+            dest = field + "2"
+            if getattr(args, dest) is None:
+                setattr(args, dest, looked_up2.get(field))
+        args.name_jp2 = args.name_jp2 or ""
+
+        if not had_name2 and looked_up2.get("_name_unavailable_local"):
+            lang_label, local_name = looked_up2["_name_unavailable_local"]
+            print(f"[note] '{args.set_query2}' has no English release on TCGdex yet -- only "
+                  f"its {lang_label} name ({local_name}) is available. "
+                  f"Pass --name2 yourself, e.g. --name2 \"{args.set_query2}\", for the English "
+                  "display text.")
+
+        missing2 = [f for f in ("set_code2", "name2", "release_date2", "total_cards2") if not getattr(args, f)]
+        if missing2:
+            flags = ", ".join(f"--{f[:-1].replace('_', '-')}2" for f in missing2)
+            parser.error(f"couldn't determine {flags} from --set2 \"{args.set_query2}\" -- "
+                         f"pass them directly to fill in the gaps")
+        args.total_cards2 = str(args.total_cards2)
+
+        args.rarity_counts2 = []
+        if args.rarity_chart:
+            cards2 = looked_up2.get("_cards")
+            if not cards2:
+                print("[warning] --rarity-chart needs a successful --set2 lookup with a card "
+                      "list, which isn't available here -- skipping the second rarity chart.")
+            else:
+                args.rarity_counts2 = fetch_rarity_counts(
+                    cards2, looked_up2["_cards_lang"], verbose=args.verbose)
+
     if not args.out:
         safe_name = "".join(c if c.isalnum() else "_" for c in args.name).strip("_")
-        args.out = f"{args.set_code}_{safe_name}_{lang_tag}_cover.png"
+        if args.set_query2:
+            args.out = f"{args.set_code}_{args.set_code2}_dual_cover.png"
+        else:
+            args.out = f"{args.set_code}_{safe_name}_{lang_tag}_cover.png"
 
     img = build_cover(args)
     img.save(args.out, "PNG")
-    print(f"Saved {args.out}  ({args.size}x{args.size}px)")
+    print(f"Saved {args.out}  ({img.width}x{img.height}px)")
 
 
 if __name__ == "__main__":
