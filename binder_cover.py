@@ -682,12 +682,13 @@ def build_cover(cfg):
                 max_count = max(c for _, c in counts)
                 row_y = rows_top
                 for label, count in counts:
-                    draw.text((label_x1, row_y), label, font=rarity_label_font_dual, fill=INK, anchor="ra")
+                    row_mid = row_y + rarity_row_h_dual / 2
+                    draw.text((label_x1, row_mid), label, font=rarity_label_font_dual, fill=INK, anchor="rm")
                     bar_w = max(4, int(bar_max_w * count / max_count))
                     bar_top = row_y + (rarity_row_h_dual - bar_h) / 2
                     draw.rounded_rectangle([bar_x0, bar_top, bar_x0 + bar_w, bar_top + bar_h],
                                             radius=bar_h // 2, fill=RED)
-                    draw.text((count_x0, row_y), str(count), font=rarity_count_font_dual, fill=GRAY, anchor="la")
+                    draw.text((count_x0, row_mid), str(count), font=rarity_count_font_dual, fill=GRAY, anchor="lm")
                     row_y += rarity_row_h_dual
             return rows_top + len(counts) * rarity_row_h_dual
 
@@ -854,13 +855,14 @@ def build_cover(cfg):
                 max_count = max(c for _, c in cfg.rarity_counts)
                 row_y = rows_top
                 for label, count in cfg.rarity_counts:
-                    draw.text((label_x1, row_y), label, font=rarity_label_font, fill=INK, anchor="ra")
+                    row_mid = row_y + rarity_row_h / 2
+                    draw.text((label_x1, row_mid), label, font=rarity_label_font, fill=INK, anchor="rm")
                     bar_w = max(6, int(bar_max_w * count / max_count))
                     bar_top = row_y + (rarity_row_h - bar_h) / 2
                     draw.rounded_rectangle(
                         [bar_x0, bar_top, bar_x0 + bar_w, bar_top + bar_h],
                         radius=bar_h // 2, fill=RED)
-                    draw.text((count_x0, row_y), str(count), font=rarity_count_font, fill=GRAY, anchor="la")
+                    draw.text((count_x0, row_mid), str(count), font=rarity_count_font, fill=GRAY, anchor="lm")
                     row_y += rarity_row_h
             # Fixed regardless of row count, so this block is always exactly as tall
             # as the QR code box -- see rarity_chart_h above.
