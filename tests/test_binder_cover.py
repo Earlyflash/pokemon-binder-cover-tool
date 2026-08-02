@@ -399,6 +399,14 @@ class TestSortAndAbbreviateRarities(unittest.TestCase):
         labels = [label for label, _ in result]
         self.assertEqual(len(labels), len(set(labels)))  # no duplicate labels
 
+    def test_none_rarity_sorts_first_as_the_base_tier_not_last_alphabetically(self):
+        # TCGdex returns the literal string "None" for untagged cards (common on
+        # Japan-exclusive sets) -- it's the base/common tier, so despite being an
+        # unrecognized name it should sort before "Common", not after Zebra Rare.
+        counts = {"Double Rare": 8, "None": 166, "Zebra Rare": 1}
+        result = bc._sort_and_abbreviate_rarities(counts)
+        self.assertEqual(result, [("C/U", 166), ("RR", 8), ("ZR", 1)])
+
 
 class TestFetchRarityCounts(unittest.TestCase):
     @patch("binder_cover._fetch_json")

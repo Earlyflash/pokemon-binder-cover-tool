@@ -491,8 +491,12 @@ def build_cover(cfg):
 
         # Rarity chart rows are sized to fit within the same total height as the QR code
         # box, however many rarity tiers there are -- so it never pushes the rule below
-        # it further down than a QR code or completion gauge would.
-        rarity_chart_h = qr_size + 2 * int(qr_size * 0.047)
+        # it further down than a QR code or completion gauge would. Must match whichever
+        # QR size is actually in play (qr_size_split when paired with the chart, qr_size
+        # otherwise) -- using the wrong one here left the chart visibly taller than the
+        # QR box whenever both were shown together.
+        _qr_size_for_rarity_h = qr_size_split if wants_qr_and_rarity else qr_size
+        rarity_chart_h = _qr_size_for_rarity_h + 2 * int(_qr_size_for_rarity_h * 0.047)
         num_rarity_rows = len(cfg.rarity_counts)
         rarity_row_h = rarity_chart_h / num_rarity_rows if num_rarity_rows else rarity_chart_h
         rarity_label_font = get_font("bold_caps", int(min(dsz(38), max(16, rarity_row_h * 0.5))), fd)[0]
@@ -980,7 +984,10 @@ def build_cover(cfg):
                     draw_spaced(draw, cx, stat_top, stat_text, f_stat, GRAY, 2)
                 ym = stat_top + int(f_stat.size * 1.3)
 
-            extra_top = ym + int(S * 0.018)
+            ym += int(S * 0.018)
+            if render_:
+                draw.line([(content_x0, ym), (content_x1, ym)], fill=LIGHT_RULE, width=3)
+            extra_top = ym + int(S * 0.022)
 
             if qr_img is not None and cfg.rarity_counts:
                 # Split around cx the same way run_dual splits a column in half
@@ -1435,6 +1442,13 @@ RARITY_ABBREVIATIONS = {
     "ultra rare": "UR", "hyper rare": "HR", "radiant rare": "RA",
     "amazing rare": "AMZ", "rare ace": "ACE", "ace spec rare": "ACE",
     "rare prime": "PRIME", "rare break": "BREAK", "promo": "PR",
+    # TCGdex returns the literal string "None" (not a null/missing field) for
+    # cards it hasn't tagged with a specific rarity -- common on Japan-exclusive
+    # sets where it hasn't backfilled the common/uncommon split. It's the base
+    # tier, not an unrecognized exotic one, so _sort_and_abbreviate_rarities
+    # special-cases it to sort first rather than falling into the alphabetical-
+    # after-known-rarities bucket the way a genuinely unrecognized name would.
+    "none": "C/U",
 }
 
 
@@ -1452,6 +1466,11 @@ def _sort_and_abbreviate_rarities(counts):
     after the recognized ones."""
     def sort_key(name):
         key = name.strip().lower()
+        if key == "none":
+            # TCGdex's untagged-rarity bucket is the base/common tier, not an
+            # unrecognized exotic one -- sorts before even "common" instead of
+            # alphabetically after all the recognized rarities.
+            return (-1, "")
         try:
             return (0, RARITY_ORDER.index(key))
         except ValueError:
