@@ -479,8 +479,12 @@ def build_cover(cfg):
         # needs to be a bit smaller to leave room for the chart next to it.
         wants_qr_and_rarity = landscape and bool(cfg.qr_url) and bool(cfg.rarity_counts)
         qr_img = None
-        qr_size = int(S * 0.1194)  # 430/3600
-        qr_size_split = int(S * 0.08)
+        # Scaled by dscale (1.0 off a5-landscape, so square/a5 are unaffected) --
+        # unlike run_dual's QR, this one looked small once the surrounding text on
+        # a5-landscape grew via dscale, since it's now the only large fixed-size
+        # graphic left in a layout otherwise scaled up to match.
+        qr_size = int(S * 0.1194 * dscale)  # 430/3600
+        qr_size_split = int(S * 0.08 * dscale)
         if cfg.qr_url:
             qr_img = make_qr_image(cfg.qr_url, qr_size_split if wants_qr_and_rarity else qr_size,
                                     verbose=cfg.verbose)
@@ -954,6 +958,71 @@ def build_cover(cfg):
             draw.line([(content_x0, ym), (content_x1, ym)], fill=LIGHT_RULE, width=3)
         ym += int(S * 0.029)
 
+        if landscape:
+            # Compact centered date/cards + stats lines, same style as the dual
+            # layout's per-column "DATE · CARDS" / "MAIN · SECRET" lines, instead
+            # of the square/a5 two-column grid + separate left-stats block below --
+            # there's only one set here so a left/right split isn't needed, and
+            # centering everything (including the QR/gauge/rarity row further
+            # down) keeps this visually consistent with the dual-set cover.
+            mini_text = f"{cfg.release_date.upper()} · {cfg.total_cards} CARDS"
+            f_mini = fit_font("bold_display", mini_text, dsz(60), content_w, dsz(30), fd, spacing=2)
+            mini_top = ym + int(S * 0.014)
+            if render_:
+                draw_spaced(draw, cx, mini_top, mini_text, f_mini, INK, 2)
+            ym = mini_top + int(f_mini.size * 1.3)
+
+            if stats:
+                stat_text = " · ".join(f"{value} {label.split()[0].upper()}" for label, value in stats)
+                f_stat = fit_font("medium", stat_text, dsz(48), content_w, dsz(22), fd, spacing=2)
+                stat_top = ym + int(S * 0.004)
+                if render_:
+                    draw_spaced(draw, cx, stat_top, stat_text, f_stat, GRAY, 2)
+                ym = stat_top + int(f_stat.size * 1.3)
+
+            extra_top = ym + int(S * 0.018)
+
+            if qr_img is not None and cfg.rarity_counts:
+                # Split around cx the same way run_dual splits a column in half
+                # for its "both" case.
+                half_w = content_w / 4
+                qr_gcx = cx - half_w
+                rarity_gcx = cx + half_w
+                qr_bottom = draw_qr(qr_gcx, half_w * 1.7, extra_top, render_)
+                rarity_bottom = draw_rarity(rarity_gcx, half_w * 0.85, extra_top, render_)
+                return max(qr_bottom, rarity_bottom)
+
+            if qr_img is not None:
+                return draw_qr(cx, content_w * 0.6, extra_top, render_)
+
+            if completion is not None:
+                # Scaled by dscale along with gauge_pct_font/gauge_caption_font so
+                # the ring grows to fit its own (now bigger) text instead of the
+                # percentage/"COMPLETE" label overflowing a fixed-size ring.
+                gauge_r = int(S * 0.0697 * dscale)
+                gcy = extra_top + gauge_r + int(S * 0.011)
+                bbox = [cx - gauge_r, gcy - gauge_r, cx + gauge_r, gcy + gauge_r]
+                thickness = int(gauge_r * 0.18)
+                pct = max(0, min(100, completion["pct"]))
+                if render_:
+                    draw.arc(bbox, 0, 360, fill=(222, 213, 193), width=thickness)
+                    draw.arc(bbox, -90, -90 + 360 * (pct / 100.0), fill=RED, width=thickness)
+                    centered(draw, cx, gcy - gauge_pct_font.size * 0.28, f"{pct}%", gauge_pct_font, INK)
+                    draw_spaced(draw, cx, gcy + gauge_pct_font.size * 0.5, "COMPLETE", gauge_caption_font, GRAY, 6)
+                bottom = gcy + gauge_r
+                if completion["collected"] is not None:
+                    cap_y = bottom + int(S * 0.02)
+                    if render_:
+                        centered(draw, cx, cap_y, f"{completion['collected']} / {completion['total']}", val2_font, INK)
+                    bottom = cap_y + int(val2_font.size * 0.8)
+                return bottom
+
+            if cfg.rarity_counts:
+                return draw_rarity(cx, int(content_w * 0.2), extra_top, render_)
+
+            return extra_top
+
+        # ---- square/a5 (portrait): release date / total cards two-column grid --
         grid_top = ym
         row1_val_y = grid_top + int(lbl_font.size * 2.36)
 
@@ -1008,25 +1077,11 @@ def build_cover(cfg):
         right_bottom = row2_top
         qr_col_max_w = content_x1 - cx
 
-        if qr_img is not None and cfg.rarity_counts and landscape:
-            # Landscape's right area is wide enough to show the QR code and the
-            # rarity chart side by side instead of one replacing the other.
-            right_x0, right_x1 = cx, content_x1
-            half_w = (right_x1 - right_x0) / 2
-            qr_gcx = right_x0 + half_w * 0.5
-            rarity_gcx = right_x0 + half_w * 1.5
-            qr_bottom = draw_qr(qr_gcx, half_w * 0.86, row2_top, render_)
-            rarity_bottom = draw_rarity(rarity_gcx, half_w * 0.42, row2_top, render_)
-            right_bottom = max(qr_bottom, rarity_bottom)
-
-        elif qr_img is not None:
+        if qr_img is not None:
             right_bottom = draw_qr(gcx, qr_col_max_w, row2_top, render_)
 
         elif completion is not None:
-            # Scaled by dscale along with gauge_pct_font/gauge_caption_font so the
-            # ring grows to fit its own (now bigger, on a5-landscape) text instead
-            # of the percentage/"COMPLETE" label overflowing a fixed-size ring.
-            gauge_r = int(S * 0.0697 * dscale)
+            gauge_r = int(S * 0.0697)
             gcy = row2_top + gauge_r + int(S * 0.011)
             bbox = [gcx - gauge_r, gcy - gauge_r, gcx + gauge_r, gcy + gauge_r]
             thickness = int(gauge_r * 0.18)
