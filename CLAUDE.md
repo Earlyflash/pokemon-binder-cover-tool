@@ -165,7 +165,8 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    to vertically center that content inside the panel. Any layout change
    must keep the two passes consistent — every branch that advances `y`
    must do so identically in both, and drawing should only happen inside
-   `if render:` guards. `run_dual` itself branches on `landscape`:
+   `if render:` guards. Both functions branch on `landscape`, with the same
+   shape of split:
    - Square/`a5`: header → rule → middle content → rule → footer are one
      block, centered as a whole in the panel (the original design, kept
      as-is since square/`a5` don't have landscape's spare vertical room to
@@ -176,37 +177,54 @@ Everything is in `binder_cover.py`, organized into five sections (see the
      descender box, since all-caps text has no descenders and anchoring off
      the nominal box leaves visibly more whitespace under the text than
      above it) so the gaps above/below each are symmetric. Only the
-     *middle* content (code/name/date/stats/QR) is two-pass centered, in
-     the space between the two rules — reclaiming the vertical space that
-     would otherwise sit unused above the header/below the footer. A
-     `dscale` multiplier (on top of the usual `FONT_SCALE`) enlarges every
-     font in this path, and `margin`/`pad` are both trimmed, since
-     a5-landscape has much more page area than the short-edge-based sizing
-     assumes it needs; QR code size is deliberately *not* scaled by
-     `dscale`. When a column has both a QR code and a rarity chart, they're
-     drawn side by side (not stacked) to use that extra width. The rarity
-     chart's total height is fixed (matched to the QR box next to it) and
-     divided across however many rarity tiers there are — same principle
-     as the single-set layout's `rarity_chart_h` — rather than a fixed
-     per-row height, so a set with many tiers can't grow the chart past the
-     panel.
+     *middle* content is two-pass centered, in the space between the two
+     rules — reclaiming the vertical space that would otherwise sit unused
+     above the header/below the footer. A `dscale` multiplier (on top of
+     the usual `FONT_SCALE`) enlarges every font in this path — bigger for
+     `run_dual` (`2.2`) than `run` (`1.3`), since the single-set layout has
+     more row groups (era, code, name, jp, date/cards grid, stats+QR/
+     rarity/gauge row) than the dual layout's more compact column and would
+     overflow the middle band at the same multiplier — and `margin`/`pad`
+     are both trimmed, since a5-landscape has much more page area than the
+     short-edge-based sizing assumes it needs. QR code size is deliberately
+     *not* scaled by `dscale` (`qr_size`/`qr_size_split`/`qr_size_dual`),
+     but the completion gauge's radius (`run` only, `--completion` with no
+     `--qr-url`) *is*, since it's a ring sized to fit its own percentage/
+     "COMPLETE" text rather than a fixed graphic like the QR module — at
+     `dscale` on the text but not the ring, the enlarged text overflowed a
+     fixed-size ring. When a column has both a QR code and a rarity chart,
+     they're drawn side by side (not stacked) to use that extra width. The
+     rarity chart's total height is fixed (matched to the QR box next to
+     it) and divided across however many rarity tiers there are — same
+     principle in both `run` (`rarity_chart_h`) and `run_dual`
+     (`rarity_chart_h_dual`) — rather than a fixed per-row height, so a set
+     with many tiers can't grow the chart past the panel.
 
-   Within `run()` (single-set), the layout goes: header → era subheading →
-   rule → big set-code → set name (+ optional Japanese name) → rule →
-   release date / total cards two-column grid → rule → left column (up to 2
+   Content-wise, `run()` (single-set) goes: header → era subheading → rule
+   → big set-code → set name (+ optional Japanese name) → rule → release
+   date / total cards two-column grid → rule → left column (up to 2
    `--stat` rows) alongside a right column that is *either* a QR code block
    (`--qr-url`) *or* a circular completion gauge (`--completion`) *or* a
    rarity distribution chart (`--rarity-chart`) *or* blank — in that
    priority order if more than one is given → rule → footer with Poke Ball
-   icon. The `--lang-flag` badge (if given) is drawn separately, straight
-   onto the background before `run`/`run_dual` is called — like the accent
-   tab, it sits in the fixed margin/inset strip outside the centered content
+   icon. On `a5-landscape` specifically, the era subheading moves from
+   between the header and the top rule to being the first item in the
+   two-pass-centered middle content instead (so the pinned header band only
+   ever has to account for the header text itself, not a variable-height
+   header+era combination) — everything else in that list is unchanged,
+   just shared via a `middle_single(ym0, render_)` closure so both branches
+   render it identically. `run_dual`'s content is more compact — see its own
+   section above.
+
+   The `--lang-flag` badge (if given) is drawn separately, straight onto
+   the background before `run`/`run_dual` is called — like the accent tab,
+   it sits in the fixed margin/inset strip outside the centered content
    flow, so it doesn't participate in the two-pass height measurement. The
-   one exception is `dual`+`landscape`: the badge is vertically centered
-   against the header band instead (computed once, before the background is
-   drawn, and reused by both the badge and `run_dual` so the two can't drift
-   apart), since the header there is pinned rather than part of one centered
-   block.
+   one exception is `landscape` (single-set or dual): the badge is
+   vertically centered against the header band instead (computed once,
+   before the background is drawn, and reused by `run`/`run_dual` so the
+   three can't drift apart), since the header there is pinned rather than
+   part of one centered block.
 
 `main()` parses args, defaults `--out` to `<SET_CODE>_<name>_<EN|JP>_cover.png`
 (`JP` if a Japanese name ends up on the cover, `EN` otherwise), and saves the PNG.

@@ -92,6 +92,10 @@ are omitted since every invocation needs them.
 <td>Completion gauge, bare-percent form (<code>--completion 100</code>) plus a single custom stat row: <code>--stat "Alt Arts" 12</code></td>
 </tr>
 <tr>
+<td><img src="samples/M2A_MEGA_Dream_ex_a5_landscape_cover.png" width="260" alt="M2A MEGA Dream ex a5-landscape cover"></td>
+<td><code>--paper a5-landscape</code> on a single-set cover: bigger text and tighter margins using the landscape page's extra space, QR code and rarity chart side by side, and <code>--lang-flag jp</code></td>
+</tr>
+<tr>
 <td><img src="samples/M3_Nihil_Zero_JP_cover.png" width="260" alt="M3 Nihil Zero cover"></td>
 <td>Rarity distribution chart instead of a QR code/gauge: <code>--rarity-chart</code></td>
 </tr>
@@ -252,14 +256,14 @@ are omitted since every invocation needs them.
   documented above still applies per set, with a `2`-suffixed flag for the
   second one (`--name2`, `--stat2`, `--qr-url2`, etc.). It's a more compact
   layout than the single-set cover: no era subheading, and the right column
-  is QR code and/or rarity chart only (no completion gauge). `--paper
-  a5-landscape` specifically gets extra treatment since that page shape has
-  much more width to spare than the square/`a5` covers do: bigger text
-  throughout, tighter page margins, and -- when a column has both a QR code
-  and a rarity chart -- they sit side by side instead of stacked. `--stat`/
-  `--stat2` (the Main Set/Secret Rares split) only render on
-  `--paper a5-landscape`; the square and `a5` dual layouts stay compact
-  without them.
+  is QR code and/or rarity chart only (no completion gauge). `--stat`/
+  `--stat2` (the Main Set/Secret Rares split) only render on `--paper
+  a5-landscape`; the square and `a5` dual layouts stay compact without them.
+- **`--paper a5-landscape`**: gets extra treatment, on both single-set and
+  dual-set covers, since that page shape has much more width to spare than
+  the square/`a5` covers do -- bigger text throughout, tighter page margins,
+  and -- when a QR code and a rarity chart are both shown in the same
+  column -- they sit side by side instead of stacked.
 - **Printing**: at the default 3600px size you've got clean 300dpi print
   quality up to 12x12in -- crop down in any image editor (or your printer's
   driver) to match your actual binder's cover-insert size.

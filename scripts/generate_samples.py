@@ -13,9 +13,13 @@ synthetic set (m6) that TCGdex doesn't know about at all, to demonstrate the
 Also covers a handful of real Scarlet & Violet-era sets (sv01, sv03.5,
 sv08.5, sv10) so the era subheading is shown for a series other than Mega
 Evolution, and to exercise --lang-flag (one of each of its four badges).
-Between them, the jobs below exercise every flag binder_cover.py has except
---font-dir (covered instead by tests/test_binder_cover.py's font-resolution
-tests, since it needs a real alternate font file on disk to be meaningful).
+One extra m2a job covers --paper a5-landscape on a single-set cover (bigger
+text, pinned header/footer, QR + rarity chart side by side) -- the same
+treatment --paper a5-landscape gets on the dual-set covers in DUAL_JOBS
+below. Between them, the jobs below exercise every flag binder_cover.py has
+except --font-dir (covered instead by tests/test_binder_cover.py's font-
+resolution tests, since it needs a real alternate font file on disk to be
+meaningful).
 
 The DUAL_JOBS block afterward covers --set2 and everything that comes with
 it: the baseline side-by-side layout, --rarity-chart per column, --qr-url2
@@ -78,6 +82,17 @@ JOBS = [
                  "--completion", "100", "--stat", "Alt Arts", "12"],
         "out": "M2A_MEGA_Dream_ex_JP_cover.png",
         "covers": "--completion (bare percent form), single --stat override",
+    },
+    {
+        "set": "m2a",
+        "args": ["--name", "MEGA Dream ex", "--name-jp", "MEGAドリームex",
+                 "--paper", "a5-landscape",
+                 "--qr-url", f"{RARECANDY}/mega-dream-ex?username=Earlyflash&sortBy=setSortOrder%253Aasc&productCategory=SINGLE_CARD",
+                 "--rarity-chart", "--lang-flag", "jp"],
+        "out": "M2A_MEGA_Dream_ex_a5_landscape_cover.png",
+        "covers": "--paper a5-landscape on a single-set cover -- the same bigger-text/"
+                  "pinned-header-footer treatment as the dual-set a5-landscape covers "
+                  "below, QR code and rarity chart side by side, --lang-flag jp",
     },
     {
         "set": "m3",
