@@ -21,10 +21,12 @@ The DUAL_JOBS block afterward covers --set2 and everything that comes with
 it: the baseline side-by-side layout, --rarity-chart per column, --qr-url2
 (both columns showing a QR code), a mixed column (one QR, one rarity chart)
 to show the per-column QR > rarity priority, --paper a5 with a dual-set
-cover, and --paper a5-landscape stacking QR + rarity in the same column
-(the extra width the landscape layout has room for). All reuse m3/m4 (Nihil
-Zero/Ninja Spinner) since they're already the --set2 example set elsewhere
-in this repo (README, CLAUDE.md).
+cover, --paper a5-landscape on its own (bigger reclaimed-space layout, the
+Main Set/Secret Rares stat line under the date/cards line, --lang-flag), and
+--paper a5-landscape with --rarity-chart showing the QR code and rarity
+chart side by side in the same column (the extra width the landscape layout
+has room for). All reuse m3/m4 (Nihil Zero/Ninja Spinner) since they're
+already the --set2 example set elsewhere in this repo (README, CLAUDE.md).
 
 Usage:
     python scripts/generate_samples.py                  # refreshes samples/ in place
@@ -224,12 +226,23 @@ DUAL_JOBS = [
     {
         "set": "m3",
         "args": [*_M3_M4_NAMES, "--paper", "a5-landscape",
+                 "--qr-url", f"{RARECANDY}/nihil-zero?username=Earlyflash&sortBy=setSortOrder%253Aasc&productCategory=SINGLE_CARD",
+                 "--qr-url2", f"{RARECANDY}/ninja-spinner?username=Earlyflash&sortBy=setSortOrder%253Aasc&productCategory=SINGLE_CARD",
+                 "--lang-flag", "jp"],
+        "out": "M3_M4_dual_a5_landscape_cover.png",
+        "covers": "--paper a5-landscape on a dual-set cover -- bigger text and tighter "
+                  "margins reclaiming the landscape page's extra space, the Main Set/"
+                  "Secret Rares stat line under the date/cards line, --lang-flag jp",
+    },
+    {
+        "set": "m3",
+        "args": [*_M3_M4_NAMES, "--paper", "a5-landscape",
                  "--qr-url", f"{RARECANDY}/nihil-zero?username=Earlyflash",
                  "--qr-url2", f"{RARECANDY}/ninja-spinner?username=Earlyflash",
                  "--rarity-chart"],
         "out": "M3_M4_dual_a5_landscape_qr_rarity_cover.png",
-        "covers": "--paper a5-landscape stacking QR code + rarity chart in the same "
-                  "column -- the extra width landscape has room for",
+        "covers": "--paper a5-landscape showing the QR code and rarity chart side by "
+                  "side in the same column -- the extra width landscape has room for",
     },
 ]
 
