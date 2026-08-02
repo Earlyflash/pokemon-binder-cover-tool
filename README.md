@@ -14,7 +14,10 @@ you can override any individual field with its own flag.
 Output is a 3600x3600px PNG by default (12in x 12in at 300dpi) sized for a
 9-pocket zip binder, sitting on a plain white background (with a soft drop
 shadow) so you can crop it to whatever binder size you actually have without
-wasting ink printing a dark background.
+wasting ink printing a dark background. Pass `--paper a5` or `--paper
+a5-landscape` instead to print straight onto an A5 sticker/insert, and
+`--set2` to fit two short sets side by side on one cover -- see "Dual-set
+covers" below.
 
 ## Setup (one-time)
 
@@ -144,6 +147,18 @@ are omitted since every invocation needs them.
 <td><img src="samples/SV10_Destined_Rivals_JP_cover.png" width="260" alt="SV10 Destined Rivals cover"></td>
 <td>The Korean flag badge (<code>--lang-flag kr</code>) plus two custom stat rows -- also shows that a set with an official English release gets its Japanese name filled in automatically, unlike the Japan-exclusive M-series above which needs <code>--name-jp</code> by hand</td>
 </tr>
+<tr>
+<td><img src="samples/M3_M4_dual_cover.png" width="260" alt="M3 M4 dual-set cover"></td>
+<td>Baseline dual-set cover: <code>--set2 M4 --name2 "Ninja Spinner" --name-jp2 ニンジャスピナー</code> fits two sets side by side on one square cover</td>
+</tr>
+<tr>
+<td><img src="samples/M3_M4_dual_a5_landscape_cover.png" width="260" alt="M3 M4 dual-set a5-landscape cover"></td>
+<td><code>--paper a5-landscape</code> on a dual-set cover: bigger text and tighter margins using the landscape page's extra space, the Main Set/Secret Rares stat line under the date/cards line, and <code>--lang-flag jp</code></td>
+</tr>
+<tr>
+<td><img src="samples/M3_M4_dual_a5_landscape_qr_rarity_cover.png" width="260" alt="M3 M4 dual-set a5-landscape QR and rarity cover"></td>
+<td><code>--paper a5-landscape</code> with both <code>--qr-url</code>/<code>--qr-url2</code> and <code>--rarity-chart</code>: each column shows its QR code and rarity breakdown side by side</td>
+</tr>
 </table>
 
 ## All the flags
@@ -170,10 +185,15 @@ are omitted since every invocation needs them.
 | `--accent-tab` / `--no-accent-tab` | no | Show/hide the small red tab on the right edge. Default on. |
 | `--lang-flag` | no | Show a small national flag badge in the top-left corner: `en`, `jp`, `cn`, or `kr`. Off by default. Purely a label you choose yourself -- it doesn't affect the lookup (which already searches Chinese/Korean TCGdex datasets on its own; see "Set lookup" below), and there's no `--name-cn`/`--name-kr` display field to fill in the way `--name-jp` does. |
 | `--bg-color` | no | Hex color (no `#`) for the area outside the panel. Default `FFFFFF` (white), so printing doesn't waste ink. |
-| `--size` | no | Canvas size in px (square). Default `3600` (12in @ 300dpi). |
+| `--paper` | no | `square` (default, current behavior), `a5` (A5 portrait sheet), or `a5-landscape` (the same A5 sheet turned sideways, text stays upright). See "Dual-set covers" below. |
+| `--size` | no | Pixel length of the short edge. Default `3600` (12in @ 300dpi) for `--paper square`, or `1748` (148mm @ 300dpi) for `--paper a5`/`a5-landscape`. |
 | `--font-dir` | no | An extra folder to search for fonts first (useful if you want to swap in your own). |
 | `-o, --out` | no | Output PNG path. Defaults to `<SET_CODE>_<name>_<EN\|JP>_cover.png` in the current folder -- `JP` if the cover shows a Japanese name, `EN` otherwise. |
 | `-v, --verbose` | no | Prints which font file was used for each text role, and which TCGdex lookups were tried -- handy for troubleshooting. |
+| `--set2` | no | A second set (code or name) for a dual-set binder cover -- see "Dual-set covers" below. Off by default; the single-set cover above is unaffected if omitted. |
+| `--set-code2`, `--name2`, `--name-jp2`, `--release-date2`, `--total-cards2` | no | Per-`--set2` overrides, same meaning as their unsuffixed counterparts above. |
+| `--stat2 LABEL VALUE` | no | Up to two stat values for `--set2`'s column, shown as a compact line under its date/cards line on `--paper a5-landscape` (e.g. `180 MAIN · 20 SECRET`). Same auto-fill/override behavior as `--stat`. |
+| `--qr-url2`, `--qr-caption2`, `--qr-subcaption2` | no | Per-`--set2` QR code, same meaning as their unsuffixed counterparts above. |
 
 ## Notes
 
@@ -227,6 +247,19 @@ are omitted since every invocation needs them.
 - **Long names**: text that's too wide for the card (a long `--name`, a long
   `--footer`, etc.) automatically shrinks to fit -- you don't need to worry
   about it overflowing the panel.
+- **Dual-set covers** (`--set2`): fits two sets side by side on one cover,
+  for binders that hold two short sets sharing one folder -- everything
+  documented above still applies per set, with a `2`-suffixed flag for the
+  second one (`--name2`, `--stat2`, `--qr-url2`, etc.). It's a more compact
+  layout than the single-set cover: no era subheading, and the right column
+  is QR code and/or rarity chart only (no completion gauge). `--paper
+  a5-landscape` specifically gets extra treatment since that page shape has
+  much more width to spare than the square/`a5` covers do: bigger text
+  throughout, tighter page margins, and -- when a column has both a QR code
+  and a rarity chart -- they sit side by side instead of stacked. `--stat`/
+  `--stat2` (the Main Set/Secret Rares split) only render on
+  `--paper a5-landscape`; the square and `a5` dual layouts stay compact
+  without them.
 - **Printing**: at the default 3600px size you've got clean 300dpi print
   quality up to 12x12in -- crop down in any image editor (or your printer's
   driver) to match your actual binder's cover-insert size.

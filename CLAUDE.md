@@ -4,12 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file CLI tool (`binder_cover.py`) that generates print-ready, square
-Pokémon TCG binder cover images (a "Pokedex"-style panel) as 3600x3600px PNGs.
-Everything — font resolution, TCGdex lookup, QR generation, and pixel-level
-drawing — lives in this one script; there is no package structure and it's
-meant to be run directly. `tests/` holds a stdlib `unittest` suite (see
-below) that's also run in CI via `.github/workflows/tests.yml`.
+A single-file CLI tool (`binder_cover.py`) that generates print-ready
+Pokémon TCG binder cover images (a "Pokedex"-style panel) as PNGs — a
+3600x3600px square by default, or an A5 portrait/landscape sheet via
+`--paper`. `--set2` fits two short sets side by side on one cover instead
+of one. Everything — font resolution, TCGdex lookup, QR generation, and
+pixel-level drawing — lives in this one script; there is no package
+structure and it's meant to be run directly. `tests/` holds a stdlib
+`unittest` suite (see below) that's also run in CI via
+`.github/workflows/tests.yml`.
 
 ## Commands
 
@@ -138,28 +141,72 @@ Everything is in `binder_cover.py`, organized into five sections (see the
    otherwise collide on the same fallback abbreviation.
 
 5. **`build_cover(cfg)`** — the actual layout engine, driven by a single
-   `argparse.Namespace` (`cfg`) of CLI flags. All positions/sizes are
-   computed as fractions of `cfg.size` (the canvas is always square) so the
-   whole design scales cleanly at any resolution. The key trick is the inner
-   `run(y0, render)` closure: it's called once with `render=False` to
-   measure the total content height (nothing is drawn, only `y` is
-   accumulated), then again with `render=True` at a `start_y` computed to
-   vertically center that content inside the panel. Any change to the
-   layout (adding a block, changing a font size) must keep the two passes
-   consistent — every branch that advances `y` must do so identically in
-   both passes, and drawing should only happen inside `if render:` guards.
+   `argparse.Namespace` (`cfg`) of CLI flags. `cfg.paper` (`square`/`a5`/
+   `a5-landscape`) picks the canvas shape: `square` is `cfg.size` on both
+   sides; `a5`/`a5-landscape` derive the long edge from the A5 ratio, with
+   `cfg.size` always the short edge. `S = min(W, H)` and `landscape = W > H`
+   drive every proportional constant (`FONT_SCALE`, margins, etc.) so the
+   design scales cleanly regardless of orientation — `landscape` in
+   particular is what the a5-landscape-specific dual-mode behavior below is
+   gated on.
 
-   Within `run()`, the layout goes: header → era subheading → rule → big
-   set-code → set name (+ optional Japanese name) → rule → release
-   date / total cards two-column grid → rule → left column (up to 2
+   `cfg.set_code2` (from `--set2`) switches the whole layout to a compact
+   side-by-side "dual" mode via `dual = bool(cfg.set_code2)`, an entirely
+   separate rendering path (`run_dual`) from the single-set `run` — for
+   binders holding two short sets sharing one folder. It intentionally
+   skips the era subheading and the completion gauge (right column is QR
+   code and/or rarity chart only, same priority as single-set). `--stat`/
+   `--stat2` (Main Set/Secret Rares) only render in `dual` mode when
+   `landscape` — square/`a5` dual covers stay compact without them.
+
+   Both `run`/`run_dual` use a two-pass measure-then-center pattern: called
+   once with `render=False` to measure content height (nothing drawn, only
+   `y` accumulated), then again with `render=True` at a `start_y` computed
+   to vertically center that content inside the panel. Any layout change
+   must keep the two passes consistent — every branch that advances `y`
+   must do so identically in both, and drawing should only happen inside
+   `if render:` guards. `run_dual` itself branches on `landscape`:
+   - Square/`a5`: header → rule → middle content → rule → footer are one
+     block, centered as a whole in the panel (the original design, kept
+     as-is since square/`a5` don't have landscape's spare vertical room to
+     reclaim).
+   - `a5-landscape`: header is pinned near the panel top and footer near
+     the panel bottom instead — both anchored off their actual rendered
+     glyph extents (`font.getbbox`, not the font's nominal ascender/
+     descender box, since all-caps text has no descenders and anchoring off
+     the nominal box leaves visibly more whitespace under the text than
+     above it) so the gaps above/below each are symmetric. Only the
+     *middle* content (code/name/date/stats/QR) is two-pass centered, in
+     the space between the two rules — reclaiming the vertical space that
+     would otherwise sit unused above the header/below the footer. A
+     `dscale` multiplier (on top of the usual `FONT_SCALE`) enlarges every
+     font in this path, and `margin`/`pad` are both trimmed, since
+     a5-landscape has much more page area than the short-edge-based sizing
+     assumes it needs; QR code size is deliberately *not* scaled by
+     `dscale`. When a column has both a QR code and a rarity chart, they're
+     drawn side by side (not stacked) to use that extra width. The rarity
+     chart's total height is fixed (matched to the QR box next to it) and
+     divided across however many rarity tiers there are — same principle
+     as the single-set layout's `rarity_chart_h` — rather than a fixed
+     per-row height, so a set with many tiers can't grow the chart past the
+     panel.
+
+   Within `run()` (single-set), the layout goes: header → era subheading →
+   rule → big set-code → set name (+ optional Japanese name) → rule →
+   release date / total cards two-column grid → rule → left column (up to 2
    `--stat` rows) alongside a right column that is *either* a QR code block
    (`--qr-url`) *or* a circular completion gauge (`--completion`) *or* a
    rarity distribution chart (`--rarity-chart`) *or* blank — in that
    priority order if more than one is given → rule → footer with Poke Ball
    icon. The `--lang-flag` badge (if given) is drawn separately, straight
-   onto the background before `run()` is called — like the accent tab, it
-   sits in the fixed margin/inset strip outside the centered content flow,
-   so it doesn't participate in the two-pass height measurement.
+   onto the background before `run`/`run_dual` is called — like the accent
+   tab, it sits in the fixed margin/inset strip outside the centered content
+   flow, so it doesn't participate in the two-pass height measurement. The
+   one exception is `dual`+`landscape`: the badge is vertically centered
+   against the header band instead (computed once, before the background is
+   drawn, and reused by both the badge and `run_dual` so the two can't drift
+   apart), since the header there is pinned rather than part of one centered
+   block.
 
 `main()` parses args, defaults `--out` to `<SET_CODE>_<name>_<EN|JP>_cover.png`
 (`JP` if a Japanese name ends up on the cover, `EN` otherwise), and saves the PNG.
